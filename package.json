@@ -1,0 +1,19 @@
+{
+    "homepage": "https://poppyfanboy.github.io/Boids",
+    "name": "boids",
+    "main": "assets/js/index.js",
+    "scripts": {
+        "start": "parcel index.html",
+        "prebuild": "rm -rf dist/*",
+        "build": "parcel build index.html --public-url /Boids/"
+    },
+    "devDependencies": {
+        "@babel/core": "^7.12.10",
+        "@babel/eslint-parser": "^7.12.1",
+        "@babel/preset-env": "^7.12.11",
+        "eslint": "^7.18.0",
+        "eslint-config-google": "^0.14.0",
+        "three": "^0.124.0",
+        "parcel-bundler": "^1.12.4"
+    }
+}
