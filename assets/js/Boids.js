@@ -1,42 +1,49 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import {
-    rayVsAabb,
-    lineVsAabb,
-    distanceToAabbBoundary,
-    vectorFromAabbBoundary,
-} from './util/Collisions.js';
+import { lineVsAabb } from './util/Collisions.js';
+import { vectorToAabbBoundary, vectorFromAabbBoundary, mirrorInsideAABB } from './util/Aabbs.js';
 
-// Applied to all boids
-const BOIDS_COUNT = 1000;
-const BOID_COLOR = 0x00587a;
-const BOID_SIZE = 0.08;
-const BOUNDING_BOX = new THREE.Box3(
-    new THREE.Vector3(-1, -0.5, -0.5),
-    new THREE.Vector3(1, 0.5, 0.5)
+/**
+ * Limit delta time passed to the update function of the app to prevent strange
+ * behavior when leaving a tab with the app for some time and then opening it
+ * once again.
+ */
+const MAX_DELTA_TIME = 200;
+
+const BOIDS_COUNT = 200;
+const BOID_COLOR = 0x6a00db;
+const BOID_SIZE = 0.08 * 1.2;
+
+/**
+ * Boids tend to stay inside the bounding box. If they get outside the clipping
+ * box, they get sent to the other side of the clipping box.
+ */
+const BOUNDING_BOX = new THREE.Box3(new THREE.Vector3(-2, -1, -1), new THREE.Vector3(2, 1, 1));
+const CLIPPING_BOX_EPSILON = BOID_SIZE * 10;
+const CLIPPING_BOX = new THREE.Box3(
+    BOUNDING_BOX.min.clone().subScalar(CLIPPING_BOX_EPSILON),
+    BOUNDING_BOX.max.clone().addScalar(CLIPPING_BOX_EPSILON)
 );
+/**
+ * After a boid is wrapped on the other side of the clipping AABB, it is brought
+ * away from each border by this distance.
+ */
+const CLIPPING_EPSILON = 0.025;
 
-// Default parameters applied for each individual boid
 /**
  * If a boid is slower than this, it does not change its direction when moving.
  */
 const BOID_MIN_SPEED = 1e-6;
-const BOID_MAX_SPEED = 0.3;
-const BOID_MAX_FORCE = 0.1;
+const BOID_MAX_SPEED = 0.35;
+const BOID_MAX_FORCE = 1.5;
 const BOID_MASS = 1.0;
-const BOID_PERCEPTION_RADIUS = 0.35;
+const BOID_PERCEPTION_RADIUS = 0.3;
 
 const boidGeometry = new THREE.ConeBufferGeometry(BOID_SIZE / 2, BOID_SIZE, 8);
 const boidMaterial = new THREE.MeshPhongMaterial({
     color: BOID_COLOR,
     flatShading: true,
 });
-
-/**
- * After boid is wrapped on the other side of the bounding AABB, it is brought
- * away from each border by this distance.
- */
-const BOUNDARY_EPSILON = 0.025;
 
 /**
  *
@@ -47,7 +54,8 @@ const BOUNDARY_EPSILON = 0.025;
 class Orientation {
     /**
      * Vectors passed as arguments are *not* cloned inside the constructor.
-     * Whoever calls the constructor should take care of cloning the vectors if needed.
+     * Whoever calls the constructor should take care of cloning the vectors
+     * if needed.
      * @param {THREE.Vector3} forward
      * @param {THREE.Vector3} up
      */
@@ -58,7 +66,8 @@ class Orientation {
     }
 
     /**
-     * By default previous value of the up component is taken as the approximation.
+     * By default previous value of the up component is taken
+     * as the approximation.
      * @param {THREE.Vector3} newVelocity
      * @param {THREE.Vector3} approximateUp
      */
@@ -114,46 +123,155 @@ class Boid {
         this.boundingBox = boundingBox;
 
         this.mesh = new THREE.Mesh(boidGeometry, boidMaterial);
+        this.mesh.position.copy(this.position);
+        this.alignWithVelocity();
         scene.add(this.mesh);
     }
 
-    update(dt) {
+    alignWithVelocity() {
+        if (this.velocity.length() > BOID_MIN_SPEED) {
+            this.orientation.update(this.velocity.clone());
+            this.mesh.lookAt(this.position.clone().add(this.orientation.forward));
+            this.mesh.rotateOnAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+        }
+    }
+
+    /**
+     *
+     * @param {Number} dt
+     * @param {Array.<Boid>} boidsList
+     */
+    update(dt, boidsList) {
         const dtSeconds = dt * 0.001;
 
+        // Wrap the boid on the the side in case it gets out of the clipping
+        // box.
         if (
-            distanceToAabbBoundary(this.position, this.boundingBox) > 0 &&
-            !this.boundingBox.containsPoint(this.position)
+            vectorToAabbBoundary(this.position, CLIPPING_BOX).length() > 0 &&
+            !CLIPPING_BOX.containsPoint(this.position)
         ) {
             const ray = new THREE.Ray(this.position.clone(), this.velocity.clone());
+            const intersectionPoints = lineVsAabb(ray, CLIPPING_BOX);
+            const intersectionPointsCount = intersectionPoints.length;
+
+            if (intersectionPointsCount === 0) {
+                return;
+            }
+
             this.position
                 .copy(
-                    lineVsAabb(ray, this.boundingBox).far.clamp(
-                        this.boundingBox.min,
-                        this.boundingBox.max
+                    intersectionPoints[intersectionPointsCount - 1].point.clamp(
+                        CLIPPING_BOX.min,
+                        CLIPPING_BOX.max
                     )
                 )
-                .add(vectorFromAabbBoundary(this.position, this.boundingBox, BOUNDARY_EPSILON));
+                .add(vectorFromAabbBoundary(this.position, this.boundingBox, CLIPPING_EPSILON));
         }
 
         const steeringForce = new THREE.Vector3();
 
-        // Avoid bounding box
-        const ray = new THREE.Ray(this.position.clone(), this.velocity.clone());
-        const boundaryIntersections = rayVsAabb(ray, this.boundingBox, BOID_PERCEPTION_RADIUS);
-        if (boundaryIntersections !== null) {
-            const target = boundaryIntersections.point
+        // Avoid colliding with the bounding box (this force won't affect boids
+        // traveling alongside the bounding box)
+        const nextPredictedPosition = this.position
+            .clone()
+            .add(this.velocity.clone().normalize().multiplyScalar(2 * BOID_PERCEPTION_RADIUS));
+
+        if (
+            this.boundingBox.containsPoint(this.position) &&
+            !this.boundingBox.containsPoint(nextPredictedPosition)
+        ) {
+            const target = mirrorInsideAABB(nextPredictedPosition, this.boundingBox);
+            const desiredVelocity = target
                 .clone()
-                .add(boundaryIntersections.normal.clone().multiplyScalar(2 * BOID_SIZE));
-            const desiredVelocity = this.position
-                .clone()
-                .sub(target)
+                .sub(this.position)
                 .normalize()
-                .multiplyScalar(7 * dtSeconds);
+                .multiplyScalar(40 * dtSeconds);
             steeringForce.add(desiredVelocity.sub(this.velocity));
         }
 
+        // Return inside the bounding box, if got outside
+        const distanceToBoundary = vectorToAabbBoundary(this.position, this.boundingBox).length;
+        const eps = 0.02;
+        if (!this.boundingBox.containsPoint(this.position) || distanceToBoundary < eps) {
+            const aabbCenter = new THREE.Vector3();
+            this.boundingBox.getCenter(aabbCenter);
+
+            const desiredVelocity = aabbCenter
+                .sub(this.position)
+                .normalize()
+                .multiplyScalar(40 * dtSeconds);
+            steeringForce.add(desiredVelocity.sub(this.velocity));
+        }
+
+        // Separation, cohesion, alignment
+        if (this.boundingBox.containsPoint(this.position)) {
+            const desiredSeparationVelocity = new THREE.Vector3();
+            const neighborsCenter = new THREE.Vector3();
+            const desiredAlignmentVelocity = new THREE.Vector3();
+
+            let visibleNeighborsCount = 0;
+            let closestNeighborsCount = 0;
+            let neighborsCount = 0;
+
+            for (const otherBoid of boidsList) {
+                if (otherBoid === this) {
+                    continue;
+                }
+                const directionToOther = otherBoid.position.clone().sub(this.position);
+                const distanceToOther = directionToOther.length();
+
+                if (
+                    distanceToOther < BOID_PERCEPTION_RADIUS &&
+                    directionToOther.angleTo(this.orientation.forward) < Math.PI / 3
+                ) {
+                    neighborsCenter.add(otherBoid.position);
+                    visibleNeighborsCount++;
+                }
+
+                if (distanceToOther < 3 * BOID_SIZE / 2) {
+                    desiredSeparationVelocity.add(
+                        directionToOther
+                            .normalize()
+                            .divideScalar(distanceToOther)
+                            .multiplyScalar(-15 * dtSeconds)
+                    );
+
+                    closestNeighborsCount++;
+                }
+
+                if (distanceToOther < BOID_PERCEPTION_RADIUS) {
+                    desiredAlignmentVelocity.add(otherBoid.velocity);
+                    neighborsCount++;
+                }
+            }
+
+            if (closestNeighborsCount > 0) {
+                steeringForce.add(desiredSeparationVelocity.sub(this.velocity));
+            }
+
+            if (visibleNeighborsCount > 0) {
+                neighborsCenter.divideScalar(visibleNeighborsCount);
+
+                steeringForce.add(
+                    neighborsCenter
+                        .sub(this.position)
+                        .sub(this.velocity)
+                        .normalize()
+                        .multiplyScalar(20 * dtSeconds)
+                );
+            }
+
+            if (neighborsCount > 0) {
+                steeringForce.add(
+                    desiredAlignmentVelocity
+                        .divideScalar(neighborsCount)
+                        .multiplyScalar(40 * dtSeconds)
+                );
+            }
+        }
+
         // Thrust
-        steeringForce.add(this.orientation.forward.clone().multiplyScalar(dtSeconds));
+        steeringForce.add(this.orientation.forward.clone().multiplyScalar(50 * dtSeconds));
 
         steeringForce.clampLength(0, this.maxForce);
 
@@ -161,11 +279,7 @@ class Boid {
             .add(steeringForce.divideScalar(this.mass).multiplyScalar(dtSeconds))
             .clampLength(0, this.maxSpeed);
 
-        if (this.velocity.length() > BOID_MIN_SPEED) {
-            this.orientation.update(this.velocity.clone());
-            this.mesh.lookAt(this.position.clone().add(this.orientation.forward));
-            this.mesh.rotateOnAxis(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-        }
+        this.alignWithVelocity();
 
         this.position.add(this.velocity.clone().multiplyScalar(dtSeconds));
         this.mesh.position.copy(this.position);
@@ -185,7 +299,7 @@ export function runBoids(canvas, renderer) {
         0.1,
         200
     );
-    camera.position.set(0, 0, 3);
+    camera.position.set(0, 0, 5);
     camera.lookAt(0, 0, 0);
 
     const scene = new THREE.Scene();
@@ -199,13 +313,13 @@ export function runBoids(canvas, renderer) {
     scene.add(ambientLight);
 
     // Bounding box setup
-    const boundingBoxSize = new THREE.Vector3();
-    BOUNDING_BOX.getSize(boundingBoxSize);
+    const clippingBoxSize = new THREE.Vector3();
+    BOUNDING_BOX.getSize(clippingBoxSize);
 
     const boxGeometry = new THREE.BoxGeometry(
-        boundingBoxSize.x,
-        boundingBoxSize.y,
-        boundingBoxSize.z
+        clippingBoxSize.x,
+        clippingBoxSize.y,
+        clippingBoxSize.z
     );
     const boxWireframeGeometry = new THREE.EdgesGeometry(boxGeometry);
     const wireframeMaterial = new THREE.LineBasicMaterial({
@@ -220,8 +334,14 @@ export function runBoids(canvas, renderer) {
     for (let i = 0; i < BOIDS_COUNT; i++) {
         const position = new THREE.Vector3()
             .random()
-            .multiply(BOUNDING_BOX.max.clone().sub(BOUNDING_BOX.min))
-            .add(BOUNDING_BOX.min);
+            .multiply(
+                BOUNDING_BOX.max
+                    .clone()
+                    .sub(BOUNDING_BOX.min)
+                    .subScalar(2 * BOID_PERCEPTION_RADIUS)
+            )
+            .add(BOUNDING_BOX.min)
+            .addScalar(BOID_PERCEPTION_RADIUS);
 
         const velocity = new THREE.Vector3()
             .random()
@@ -255,7 +375,9 @@ export function runBoids(canvas, renderer) {
         if (lastUpdateTime === null) {
             lastUpdateTime = currentTime;
         }
-        const deltaTime = currentTime - lastUpdateTime;
+        let deltaTime = currentTime - lastUpdateTime;
+        deltaTime = Math.min(MAX_DELTA_TIME, deltaTime);
+
         lastUpdateTime = currentTime;
 
         boidsList.forEach((boid) => {

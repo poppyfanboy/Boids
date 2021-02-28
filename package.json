@@ -13,7 +13,7 @@
         "@babel/preset-env": "^7.12.11",
         "eslint": "^7.18.0",
         "eslint-config-google": "^0.14.0",
-        "three": "^0.124.0",
-        "parcel-bundler": "^1.12.4"
+        "parcel-bundler": "^1.12.4",
+        "three": "^0.124.0"
     }
 }

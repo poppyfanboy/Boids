@@ -1,30 +1,47 @@
+/**
+ * Assumes that the passed object is a vector with [x, [y, [z, [w]]]] properties
+ * defined and tries to guess its size.
+ */
 function getComponentsCount(vector) {
-    let count = 0;
+    let componentsCount = 0;
+
     if ('x' in vector) {
-        count++;
+        componentsCount++;
+    } else {
+        return componentsCount;
     }
+
     if ('y' in vector) {
-        count++;
+        componentsCount++;
     } else {
-        return count;
+        return componentsCount;
     }
+
     if ('z' in vector) {
-        count++;
+        componentsCount++;
     } else {
-        return count;
+        return componentsCount;
     }
+
     if ('w' in vector) {
-        count++;
+        componentsCount++;
     }
-    return count;
+    return componentsCount;
 }
 
-export function maxComponent(vector) {
-    const componentsCount = getComponentsCount(vector);
-    if (componentsCount === 0) {
+/**
+ * @param {THREE.Vector} vector
+ * @param {Number} componentsCount
+ */
+export function maxComponent(vector, componentsCount) {
+    if (componentsCount === undefined) {
+        componentsCount = getComponentsCount(vector);
+    }
+    if (componentsCount <= 0) {
         return null;
     }
-    let max = vector.x;
+
+    let max = vector.getComponent(0);
     for (let i = 1; i < componentsCount; i++) {
         if (vector.getComponent(i) > max) {
             max = vector.getComponent(i);
@@ -33,12 +50,19 @@ export function maxComponent(vector) {
     return max;
 }
 
-export function minComponent(vector) {
-    const componentsCount = getComponentsCount(vector);
-    if (componentsCount === 0) {
+/**
+ * @param {THREE.Vector} vector
+ * @param {Number} componentsCount
+ */
+export function minComponent(vector, componentsCount) {
+    if (componentsCount === undefined) {
+        componentsCount = getComponentsCount(vector);
+    }
+    if (componentsCount <= 0) {
         return null;
     }
-    let min = vector.x;
+
+    let min = vector.getComponent(0);
     for (let i = 1; i < componentsCount; i++) {
         if (vector.getComponent(i) < min) {
             min = vector.getComponent(i);
