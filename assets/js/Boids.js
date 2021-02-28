@@ -1,29 +1,10 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { lineVsAabb } from './util/Collisions.js';
 import { vectorToAabbBoundary, vectorFromAabbBoundary, mirrorInsideAABB } from './util/Aabbs.js';
 
-/**
- * Limit delta time passed to the update function of the app to prevent strange
- * behavior when leaving a tab with the app for some time and then opening it
- * once again.
- */
-const MAX_DELTA_TIME = 200;
-
-const BOIDS_COUNT = 200;
 const BOID_COLOR = 0x6a00db;
 const BOID_SIZE = 0.08 * 1.2;
 
-/**
- * Boids tend to stay inside the bounding box. If they get outside the clipping
- * box, they get sent to the other side of the clipping box.
- */
-const BOUNDING_BOX = new THREE.Box3(new THREE.Vector3(-2, -1, -1), new THREE.Vector3(2, 1, 1));
-const CLIPPING_BOX_EPSILON = BOID_SIZE * 10;
-const CLIPPING_BOX = new THREE.Box3(
-    BOUNDING_BOX.min.clone().subScalar(CLIPPING_BOX_EPSILON),
-    BOUNDING_BOX.max.clone().addScalar(CLIPPING_BOX_EPSILON)
-);
 /**
  * After a boid is wrapped on the other side of the clipping AABB, it is brought
  * away from each border by this distance.
@@ -51,7 +32,7 @@ const boidMaterial = new THREE.MeshPhongMaterial({
  * @property {THREE.Vector3} up
  * @property {THREE.Vector3} side
  */
-class Orientation {
+export class Orientation {
     /**
      * Vectors passed as arguments are *not* cloned inside the constructor.
      * Whoever calls the constructor should take care of cloning the vectors
@@ -90,37 +71,31 @@ class Orientation {
 
 /**
  *
- * @property {Number} mass
  * @property {THREE.Vector3} position
  * @property {THREE.Vector3} velocity
  * @property {Orientation} orientation
- * @property {Number} maxForce
- * @property {Number} maxSpeed
  *
  * @property {THREE.Mesh} mesh
  * @property {THREE.Box3} boundingBox
+ * @property {THREE.Box3} clippingBox
  */
-class Boid {
+export class Boid {
     /**
      *
-     * @param {Number} mass
      * @param {THREE.Vector3} position
      * @param {THREE.Vector3} velocity
      * @param {Orientation} orientation
-     * @param {Number} maxForce
-     * @param {Number} maxSpeed
      *
      * @param {THREE.Object3D} scene
      * @param {THREE.Box3} boundingBox
+     * @param {THREE.Box3} clippingBox
      */
-    constructor(mass, position, velocity, orientation, maxForce, maxSpeed, scene, boundingBox) {
-        this.mass = mass;
+    constructor(position, velocity, orientation, scene, boundingBox, clippingBox) {
         this.position = position;
         this.velocity = velocity;
         this.orientation = orientation;
-        this.maxSpeed = maxSpeed;
-        this.maxForce = maxForce;
         this.boundingBox = boundingBox;
+        this.clippingBox = clippingBox;
 
         this.mesh = new THREE.Mesh(boidGeometry, boidMaterial);
         this.mesh.position.copy(this.position);
@@ -147,11 +122,11 @@ class Boid {
         // Wrap the boid on the the side in case it gets out of the clipping
         // box.
         if (
-            vectorToAabbBoundary(this.position, CLIPPING_BOX).length() > 0 &&
-            !CLIPPING_BOX.containsPoint(this.position)
+            vectorToAabbBoundary(this.position, this.clippingBox).length() > 0 &&
+            !this.clippingBox.containsPoint(this.position)
         ) {
             const ray = new THREE.Ray(this.position.clone(), this.velocity.clone());
-            const intersectionPoints = lineVsAabb(ray, CLIPPING_BOX);
+            const intersectionPoints = lineVsAabb(ray, this.clippingBox);
             const intersectionPointsCount = intersectionPoints.length;
 
             if (intersectionPointsCount === 0) {
@@ -161,8 +136,8 @@ class Boid {
             this.position
                 .copy(
                     intersectionPoints[intersectionPointsCount - 1].point.clamp(
-                        CLIPPING_BOX.min,
-                        CLIPPING_BOX.max
+                        this.clippingBox.min,
+                        this.clippingBox.max
                     )
                 )
                 .add(vectorFromAabbBoundary(this.position, this.boundingBox, CLIPPING_EPSILON));
@@ -172,9 +147,12 @@ class Boid {
 
         // Avoid colliding with the bounding box (this force won't affect boids
         // traveling alongside the bounding box)
-        const nextPredictedPosition = this.position
-            .clone()
-            .add(this.velocity.clone().normalize().multiplyScalar(2 * BOID_PERCEPTION_RADIUS));
+        const nextPredictedPosition = this.position.clone().add(
+            this.velocity
+                .clone()
+                .normalize()
+                .multiplyScalar(2 * BOID_PERCEPTION_RADIUS)
+        );
 
         if (
             this.boundingBox.containsPoint(this.position) &&
@@ -273,120 +251,15 @@ class Boid {
         // Thrust
         steeringForce.add(this.orientation.forward.clone().multiplyScalar(50 * dtSeconds));
 
-        steeringForce.clampLength(0, this.maxForce);
+        steeringForce.clampLength(0, BOID_MAX_FORCE);
 
         this.velocity
-            .add(steeringForce.divideScalar(this.mass).multiplyScalar(dtSeconds))
-            .clampLength(0, this.maxSpeed);
+            .add(steeringForce.divideScalar(BOID_MASS).multiplyScalar(dtSeconds))
+            .clampLength(0, BOID_MAX_SPEED);
 
         this.alignWithVelocity();
 
         this.position.add(this.velocity.clone().multiplyScalar(dtSeconds));
         this.mesh.position.copy(this.position);
     }
-}
-
-/**
- *
- * @param {HTMLCanvasElement} canvas
- * @param {THREE.WebGLRenderer} renderer
- */
-export function runBoids(canvas, renderer) {
-    // Controls and graphics setup
-    const camera = new THREE.PerspectiveCamera(
-        45,
-        canvas.clientWidth / canvas.clientHeight,
-        0.1,
-        200
-    );
-    camera.position.set(0, 0, 5);
-    camera.lookAt(0, 0, 0);
-
-    const scene = new THREE.Scene();
-    const controls = new OrbitControls(camera, canvas);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff);
-    directionalLight.position.set(1, 4, 4);
-    directionalLight.intensity = 0.4;
-    scene.add(directionalLight);
-    const ambientLight = new THREE.AmbientLight(0xffffff);
-    scene.add(ambientLight);
-
-    // Bounding box setup
-    const clippingBoxSize = new THREE.Vector3();
-    BOUNDING_BOX.getSize(clippingBoxSize);
-
-    const boxGeometry = new THREE.BoxGeometry(
-        clippingBoxSize.x,
-        clippingBoxSize.y,
-        clippingBoxSize.z
-    );
-    const boxWireframeGeometry = new THREE.EdgesGeometry(boxGeometry);
-    const wireframeMaterial = new THREE.LineBasicMaterial({
-        color: 0xffffff,
-        linewidth: 2,
-    });
-    const box = new THREE.LineSegments(boxWireframeGeometry, wireframeMaterial);
-    scene.add(box);
-
-    // Boids setup
-    const boidsList = [];
-    for (let i = 0; i < BOIDS_COUNT; i++) {
-        const position = new THREE.Vector3()
-            .random()
-            .multiply(
-                BOUNDING_BOX.max
-                    .clone()
-                    .sub(BOUNDING_BOX.min)
-                    .subScalar(2 * BOID_PERCEPTION_RADIUS)
-            )
-            .add(BOUNDING_BOX.min)
-            .addScalar(BOID_PERCEPTION_RADIUS);
-
-        const velocity = new THREE.Vector3()
-            .random()
-            .subScalar(0.5)
-            .multiplyScalar(2 * BOID_MAX_SPEED);
-
-        const orientation = new Orientation(velocity.clone(), new THREE.Vector3(0, 1, 0));
-
-        boidsList.push(
-            new Boid(
-                BOID_MASS,
-                position,
-                velocity,
-                orientation,
-                BOID_MAX_FORCE,
-                BOID_MAX_SPEED,
-                scene,
-                BOUNDING_BOX
-            )
-        );
-    }
-
-    let lastUpdateTime = null;
-    function render(currentTime) {
-        if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-            renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-            camera.aspect = canvas.clientWidth / canvas.clientHeight;
-            camera.updateProjectionMatrix();
-        }
-
-        if (lastUpdateTime === null) {
-            lastUpdateTime = currentTime;
-        }
-        let deltaTime = currentTime - lastUpdateTime;
-        deltaTime = Math.min(MAX_DELTA_TIME, deltaTime);
-
-        lastUpdateTime = currentTime;
-
-        boidsList.forEach((boid) => {
-            return boid.update(deltaTime, boidsList);
-        });
-
-        renderer.render(scene, camera);
-        controls.update();
-        requestAnimationFrame(render);
-    }
-    requestAnimationFrame(render);
 }

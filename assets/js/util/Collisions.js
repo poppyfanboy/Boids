@@ -1,12 +1,6 @@
 import * as THREE from 'three';
 import { maxComponent, minComponent } from './Vectors.js';
 
-const unitVectors = [
-    new THREE.Vector3(1, 0, 0),
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 0, 1),
-];
-
 const signedUnitVectors = [
     new THREE.Vector3(-1, 0, 0),
     new THREE.Vector3(0, -1, 0),
