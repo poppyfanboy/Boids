@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from './vendor/three/three.module.js';
 import BoidsApp from './BoidsApp.js';
 
 const BACKGROUND_COLOR = 0xebce00;
