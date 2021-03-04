@@ -1,4 +1,4 @@
-import * as THREE from './vendor/three/three.module.js';
+import * as THREE from 'three';
 import { lineVsAabb } from './util/Collisions.js';
 import { vectorToAabbBoundary, vectorFromAabbBoundary, mirrorInsideAABB } from './util/Aabbs.js';
 

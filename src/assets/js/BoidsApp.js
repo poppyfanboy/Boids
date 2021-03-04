@@ -1,5 +1,5 @@
-import * as THREE from './vendor/three/three.module.js';
-import { OrbitControls } from './vendor/three/OrbitControls.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { Boid, Orientation } from './Boids.js';
 
 /**

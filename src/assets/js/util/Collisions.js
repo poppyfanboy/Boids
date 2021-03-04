@@ -1,4 +1,4 @@
-import * as THREE from '../vendor/three/three.module.js';
+import * as THREE from 'three';
 import { maxComponent, minComponent } from './Vectors.js';
 
 const signedUnitVectors = [
