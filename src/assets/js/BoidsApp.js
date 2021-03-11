@@ -1,6 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { Boid, Orientation } from './Boids.js';
+import { Boid, BoidOptions } from './Boid.js';
+import {
+    CombinedBehavior,
+    AlignmentBehavior,
+    AvoidBox,
+    AvoidBoxEdges,
+    CohesionBehavior,
+    ReturnInsideBox,
+    SeparationBehavior,
+    ThrustBehavior,
+} from './BoidBehaviors.js';
+
+const BACKGROUND_COLOR = 0xebce00;
+const BOID_COLOR = 0x6a00db;
 
 /**
  * Boids tend to stay inside the bounding box. If they get outside the clipping
@@ -12,6 +25,33 @@ const CLIPPING_BOX = new THREE.Box3(
     BOUNDING_BOX.min.clone().subScalar(CLIPPING_BOX_EPSILON),
     BOUNDING_BOX.max.clone().addScalar(CLIPPING_BOX_EPSILON)
 );
+const BOID_SIZE = 0.1;
+
+const BOID_GEOMETRY = new THREE.ConeBufferGeometry(BOID_SIZE / 2, BOID_SIZE, 8);
+const BOID_MATERIAL = new THREE.MeshPhongMaterial({
+    color: BOID_COLOR,
+    flatShading: true,
+});
+
+const BOID_MAX_FORCE = 1.5;
+const BOID_PERCEPTION_RADIUS = 0.4;
+
+/**
+ * If a boid is slower than this, it does not change its direction when moving.
+ */
+const BOID_MIN_VELOCITY = 1e-6;
+const BOID_MAX_VELOCITY = 0.35;
+const BOID_MASS = 1.2;
+
+const FORCES_IMPACTS = {
+    avoidBox: 8.0,
+    returnInsideBox: 8.0,
+    avoidBoxEdges: 8.0,
+    separation: 3.0,
+    cohesion: 4.0,
+    alignment: 8.0,
+    thrust: 10.0,
+};
 
 /**
  * Limit delta time passed to the update function of the app to prevent strange
@@ -20,26 +60,21 @@ const CLIPPING_BOX = new THREE.Box3(
  */
 const MAX_DELTA_TIME = 200;
 
-const BOIDS_COUNT = 200;
-
 /**
- * @property {HTMLCanvasElement} canvas
- * @property {THREE.WebGLRenderer} renderer
- * @property {THREE.PerspectiveCamera} camera
- * @property {OrbitControls} controls
- *
- * @property {Number} lastUpdateTime
  * @property {Array.<Boid>} boidsList
  */
 export default class BoidsApp {
     /**
-     *
      * @param {HTMLCanvasElement} canvas
      * @param {THREE.WebGLRenderer} renderer
+     * @param {Number} boidsCount
      */
-    constructor(canvas, renderer) {
+    constructor(canvas, renderer, boidsCount = 100) {
+        this.boidsCount = Math.max(boidsCount, 0);
         this.canvas = canvas;
+
         this.renderer = renderer;
+        this.renderer.setClearColor(BACKGROUND_COLOR);
 
         this.camera = new THREE.PerspectiveCamera(
             45,
@@ -49,62 +84,106 @@ export default class BoidsApp {
         );
         this.camera.position.set(0, 0, 5);
         this.camera.lookAt(0, 0, 0);
+
         this.controls = new OrbitControls(this.camera, this.canvas);
         this.scene = new THREE.Scene();
-
         this.lastUpdateTime = null;
-
         this.boidsList = [];
     }
 
     run() {
+        // Scene setup
         const directionalLight = new THREE.DirectionalLight(0xffffff);
         directionalLight.position.set(1, 4, 4);
         directionalLight.intensity = 0.4;
         this.scene.add(directionalLight);
+
         const ambientLight = new THREE.AmbientLight(0xffffff);
         this.scene.add(ambientLight);
 
-        // Bounding box setup
-        const clippingBoxSize = new THREE.Vector3();
-        BOUNDING_BOX.getSize(clippingBoxSize);
+        const boundingBoxSize = new THREE.Vector3();
+        BOUNDING_BOX.getSize(boundingBoxSize);
 
         const boxGeometry = new THREE.BoxGeometry(
-            clippingBoxSize.x,
-            clippingBoxSize.y,
-            clippingBoxSize.z
+            boundingBoxSize.x,
+            boundingBoxSize.y,
+            boundingBoxSize.z
         );
         const boxWireframeGeometry = new THREE.EdgesGeometry(boxGeometry);
         const wireframeMaterial = new THREE.LineBasicMaterial({
             color: 0xffffff,
             linewidth: 2,
         });
-        const box = new THREE.LineSegments(boxWireframeGeometry, wireframeMaterial);
-        this.scene.add(box);
+
+        const boundingBox = new THREE.LineSegments(boxWireframeGeometry, wireframeMaterial);
+        this.scene.add(boundingBox);
+
+        // Boids behaviors setup
+        const avoidBox = new AvoidBox(
+            FORCES_IMPACTS.avoidBox,
+            BOID_PERCEPTION_RADIUS,
+            BOUNDING_BOX
+        );
+        const avoidBoxEdges = new AvoidBoxEdges(FORCES_IMPACTS.avoidBoxEdges, BOUNDING_BOX);
+        const returnInsideBox = new ReturnInsideBox(FORCES_IMPACTS.returnInsideBox, BOUNDING_BOX);
+        const separation = new SeparationBehavior(
+            this.boidsList,
+            FORCES_IMPACTS.separation,
+            3 * BOID_SIZE / 2,
+            BOUNDING_BOX
+        );
+        const cohesion = new CohesionBehavior(
+            this.boidsList,
+            FORCES_IMPACTS.cohesion,
+            BOID_PERCEPTION_RADIUS,
+            BOUNDING_BOX
+        );
+        const alignment = new AlignmentBehavior(
+            this.boidsList,
+            FORCES_IMPACTS.alignment,
+            BOID_PERCEPTION_RADIUS,
+            BOUNDING_BOX
+        );
+        const thrust = new ThrustBehavior(FORCES_IMPACTS.thrust);
+
+        const behaviorsList = [
+            avoidBox,
+            avoidBoxEdges,
+            returnInsideBox,
+            separation,
+            cohesion,
+            alignment,
+            thrust,
+        ];
+        const behavior = new CombinedBehavior(behaviorsList, BOID_MAX_FORCE);
 
         // Boids setup
-        for (let i = 0; i < BOIDS_COUNT; i++) {
+        for (let i = 0; i < this.boidsCount; i++) {
             const position = new THREE.Vector3()
                 .random()
                 .multiply(
                     BOUNDING_BOX.max
                         .clone()
                         .sub(BOUNDING_BOX.min)
-                        .subScalar(2 * 0.3)
+                        .subScalar(2 * BOID_SIZE)
                 )
                 .add(BOUNDING_BOX.min)
-                .addScalar(0.3);
+                .addScalar(BOID_SIZE);
 
             const velocity = new THREE.Vector3()
                 .random()
                 .subScalar(0.5)
                 .multiplyScalar(2 * 0.35);
 
-            const orientation = new Orientation(velocity.clone(), new THREE.Vector3(0, 1, 0));
+            const mesh = new THREE.Mesh(BOID_GEOMETRY, BOID_MATERIAL);
+            this.scene.add(mesh);
 
-            this.boidsList.push(
-                new Boid(position, velocity, orientation, this.scene, BOUNDING_BOX, CLIPPING_BOX)
-            );
+            const options = new BoidOptions(mesh)
+                .setVelocity(velocity, BOID_MIN_VELOCITY, BOID_MAX_VELOCITY)
+                .setBehavior(behavior, BOID_SIZE, BOID_MASS, CLIPPING_BOX)
+                .setInitialPosition(position);
+
+            this.boidsList.push(new Boid(options));
         }
 
         requestAnimationFrame(this.render.bind(this));
@@ -123,9 +202,9 @@ export default class BoidsApp {
         if (this.lastUpdateTime === null) {
             this.lastUpdateTime = currentTime;
         }
+
         let deltaTime = currentTime - this.lastUpdateTime;
         deltaTime = Math.min(MAX_DELTA_TIME, deltaTime);
-
         this.lastUpdateTime = currentTime;
 
         this.boidsList.forEach((boid) => {

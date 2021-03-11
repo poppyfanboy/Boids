@@ -41,16 +41,17 @@ export function vectorToAabbBoundary(point, aabb) {
     }
 
     const distancesIterator = distancesToAabbSides(point, aabb);
-    let minDistance = distancesIterator.next().value;
+    let minDistance = Math.abs(distancesIterator.next().value);
     let iMin = 0;
 
     for (let i = 0; i < signedUnitVectors.length; i++) {
         const next = distancesIterator.next();
-        if (next.done) {
-            break;
-        }
         if (minDistance > Math.abs(next.value)) {
             iMin = i;
+            minDistance = Math.abs(next.value);
+        }
+        if (next.done) {
+            break;
         }
     }
 
@@ -76,13 +77,13 @@ export function vectorFromAabbBoundary(point, aabb, epsilonDistance) {
 
     for (let i = 0; i < signedUnitVectors.length; i++) {
         const next = distancesIterator.next();
-        if (next.done) {
-            break;
-        }
         if (Math.abs(next.value) > epsilonDistance) {
             continue;
         }
         resultVector.add(signedUnitVectors[i].clone().multiplyScalar(next.value - epsilonDistance));
+        if (next.done) {
+            break;
+        }
     }
 
     return resultVector;
@@ -106,15 +107,14 @@ export function mirrorInsideAABB(point, aabb) {
 
     for (let i = 0; i < signedUnitVectors.length; i++) {
         const next = distancesIterator.next();
-        if (next.done) {
-            break;
-        }
-
         if (i < 3 && next.value < 0) {
             mirroredVector.setComponent(i, -2 * next.value);
         }
         if (i >= 3 && next.value > 0) {
             mirroredVector.setComponent(i % 3, -2 * next.value);
+        }
+        if (next.done) {
+            break;
         }
     }
 
