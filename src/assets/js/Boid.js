@@ -22,10 +22,7 @@ export class BoidOptions {
     constructor(mesh) {
         this.initialPosition = new THREE.Vector3(0, 0, 0);
         this.mesh = mesh;
-        this.clippingBox = new THREE.Box3(
-            new THREE.Vector3(-Infinity, -Infinity, -Infinity),
-            new THREE.Vector3(Infinity, Infinity, Infinity)
-        );
+        this.clippingBox = INFINITE_BOX;
         this.behavior = new BoidBehavior();
         this.mass = 1;
         this.initialVelocity = new THREE.Vector3(1, 0, 0);

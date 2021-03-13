@@ -10,20 +10,33 @@ const signedUnitVectors = [
 ];
 
 /**
- * Generates distances to the given AABB's sides in the following order:
- * min.xyz, max.xyz.
+ * Generates signed (it returns the result of subtraction point coordinates from
+ * the aabb's min/max coordinates) distances to the given AABB's sides in the
+ * following order: min.xyz, max.xyz.
  * @param {THREE.Vector3} point
  * @param {THREE.Box3} aabb
  * @generator
  * @yields {Number}
  */
-export function *distancesToAabbSides(point, aabb) {
+export function *signedDistancesToAabbSides(point, aabb) {
     for (let i = 0; i < 3; i++) {
         yield point.getComponent(i) - aabb.min.getComponent(i);
     }
 
     for (let i = 0; i < 3; i++) {
         yield point.getComponent(i) - aabb.max.getComponent(i);
+    }
+}
+
+/**
+ * @param {THREE.Vector3} point
+ * @param {THREE.Box3} aabb
+ * @generator
+ * @yields {Number}
+ */
+export function *distancesToAabbSides(point, aabb) {
+    for (const signedDistance of signedDistancesToAabbSides(point, aabb)) {
+        yield Math.abs(signedDistance);
     }
 }
 
@@ -41,17 +54,17 @@ export function vectorToAabbBoundary(point, aabb) {
     }
 
     const distancesIterator = distancesToAabbSides(point, aabb);
-    let minDistance = Math.abs(distancesIterator.next().value);
+    let minDistance = distancesIterator.next().value;
     let iMin = 0;
 
     for (let i = 0; i < signedUnitVectors.length; i++) {
-        const next = distancesIterator.next();
-        if (minDistance > Math.abs(next.value)) {
-            iMin = i;
-            minDistance = Math.abs(next.value);
-        }
-        if (next.done) {
+        const distance = distancesIterator.next();
+        if (distance.done) {
             break;
+        }
+        if (minDistance > distance.value) {
+            iMin = i;
+            minDistance = distance.value;
         }
     }
 
@@ -72,18 +85,16 @@ export function vectorFromAabbBoundary(point, aabb, epsilonDistance) {
         return new THREE.Vector3();
     }
 
-    const distancesIterator = distancesToAabbSides(point, aabb);
+    let i = 0;
     const resultVector = new THREE.Vector3();
-
-    for (let i = 0; i < signedUnitVectors.length; i++) {
-        const next = distancesIterator.next();
-        if (Math.abs(next.value) > epsilonDistance) {
+    for (const signedDistance of signedDistancesToAabbSides(point, aabb)) {
+        if (Math.abs(signedDistance) > epsilonDistance) {
             continue;
         }
-        resultVector.add(signedUnitVectors[i].clone().multiplyScalar(next.value - epsilonDistance));
-        if (next.done) {
-            break;
-        }
+        resultVector.add(
+            signedUnitVectors[i].clone().multiplyScalar(signedDistance - epsilonDistance)
+        );
+        i++;
     }
 
     return resultVector;
@@ -97,26 +108,50 @@ export function vectorFromAabbBoundary(point, aabb, epsilonDistance) {
  * @param {THREE.Box3} aabb
  * @returns {THREE.Vector3}
  */
-export function mirrorInsideAABB(point, aabb) {
+export function mirrorInsideAabb(point, aabb) {
     if (aabb.containsPoint(point)) {
         return point.clone();
     }
 
-    const distancesIterator = distancesToAabbSides(point, aabb);
+    let i = 0;
     const mirroredVector = new THREE.Vector3();
-
-    for (let i = 0; i < signedUnitVectors.length; i++) {
-        const next = distancesIterator.next();
-        if (i < 3 && next.value < 0) {
-            mirroredVector.setComponent(i, -2 * next.value);
+    for (const signedDistance of signedDistancesToAabbSides(point, aabb)) {
+        if (i < 3 && signedDistance < 0) {
+            mirroredVector.setComponent(i, -2 * signedDistance);
         }
-        if (i >= 3 && next.value > 0) {
-            mirroredVector.setComponent(i % 3, -2 * next.value);
+        if (i >= 3 && signedDistance > 0) {
+            mirroredVector.setComponent(i % 3, -2 * signedDistance);
         }
-        if (next.done) {
-            break;
-        }
+        i++;
     }
 
     return mirroredVector.add(point);
+}
+
+/**
+ * Creates a new AABB with the given parameters.
+ * @param {THREE.Vector3} center
+ * @param {THREE.Vector3} size
+ */
+export function aabbCenteredAt(center, size) {
+    const halfSize = size.clone().divideScalar(2);
+    const min = center.clone().sub(halfSize);
+    const max = center.clone().add(halfSize);
+    return new THREE.Box3(min, max);
+}
+
+/**
+ * @param {THREE.Box3} aabb
+ * @param {THREE.Sphere} sphere
+ */
+export function aabbInsideSphere(aabb, sphere) {
+    if (!aabb.containsPoint(sphere.center)) {
+        return false;
+    }
+    for (const distance of distancesToAabbSides(sphere.center, aabb)) {
+        if (distance > sphere.radius) {
+            return false;
+        }
+    }
+    return true;
 }

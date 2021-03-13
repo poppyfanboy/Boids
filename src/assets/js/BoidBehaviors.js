@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Boid } from './Boid.js';
-import { mirrorInsideAABB, vectorToAabbBoundary } from './util/Aabbs.js';
+import { mirrorInsideAabb, vectorToAabbBoundary } from './util/Aabbs.js';
+import Octree from './util/Octree.js';
 
 const DEFAULT_DESIRED_VELOCITY = 1;
 const DEFAULT_PERCEPTION_RADIUS = 1;
@@ -96,7 +97,7 @@ export class AvoidBox extends BoidBehavior {
             this.boundingBox.containsPoint(boid.position) &&
             !this.boundingBox.containsPoint(nextPredictedPosition)
         ) {
-            const target = mirrorInsideAABB(nextPredictedPosition, this.boundingBox);
+            const target = mirrorInsideAabb(nextPredictedPosition, this.boundingBox);
             const desiredVelocity = target
                 .clone()
                 .sub(boid.position)
@@ -178,17 +179,17 @@ export class AvoidBoxEdges extends BoidBehavior {
  */
 export class SeparationBehavior extends BoidBehavior {
     /**
-     * @param {Array.<Boid>} boidsList
+     * @param {Octree} boidsOctree
      */
     constructor(
-        boidsList = [],
+        boidsOctree,
         desiredVelocity = DEFAULT_DESIRED_VELOCITY,
         perceptionRadius = DEFAULT_PERCEPTION_RADIUS,
         boundingBox = INFINITE_BOX
     ) {
         super(desiredVelocity);
 
-        this.boidsList = boidsList;
+        this.boidsOctree = boidsOctree;
         this.perceptionRadius = perceptionRadius;
         this.boundingBox = boundingBox;
     }
@@ -206,21 +207,21 @@ export class SeparationBehavior extends BoidBehavior {
         const desiredVelocity = new THREE.Vector3(0, 0, 0);
         let neighborsCount = 0;
 
-        for (const otherBoid of this.boidsList) {
+        for (const otherBoid of this.boidsOctree.queryElementsFromSphere(
+            new THREE.Sphere(boid.position, this.perceptionRadius)
+        )) {
             if (otherBoid === boid) {
                 continue;
             }
 
             const directionFromOther = boid.position.clone().sub(otherBoid.position);
             const distanceToOther = directionFromOther.length();
-            if (distanceToOther < this.perceptionRadius) {
-                desiredVelocity.add(
-                    directionFromOther
-                        .divideScalar(distanceToOther * distanceToOther)
-                        .multiplyScalar(this.desiredVelocity)
-                );
-                neighborsCount++;
-            }
+            desiredVelocity.add(
+                directionFromOther
+                    .divideScalar(distanceToOther * distanceToOther)
+                    .multiplyScalar(this.desiredVelocity)
+            );
+            neighborsCount++;
         }
 
         if (neighborsCount > 0) {
@@ -236,10 +237,10 @@ export class SeparationBehavior extends BoidBehavior {
  */
 export class CohesionBehavior extends BoidBehavior {
     /**
-     * @param {Array.<Boid>} boidsList
+     * @param {Octree} boidsOctree
      */
     constructor(
-        boidsList = [],
+        boidsOctree,
         desiredVelocity = DEFAULT_DESIRED_VELOCITY,
         perceptionRadius = DEFAULT_PERCEPTION_RADIUS,
         boundingBox = INFINITE_BOX,
@@ -247,7 +248,7 @@ export class CohesionBehavior extends BoidBehavior {
     ) {
         super(desiredVelocity);
 
-        this.boidsList = boidsList;
+        this.boidsOctree = boidsOctree;
         this.perceptionRadius = perceptionRadius;
         this.boundingBox = boundingBox;
         this.viewAngle = Math.abs(viewAngle);
@@ -266,17 +267,15 @@ export class CohesionBehavior extends BoidBehavior {
         const neighborsCenter = new THREE.Vector3(0, 0, 0);
         let neighborsCount = 0;
 
-        for (const otherBoid of this.boidsList) {
+        for (const otherBoid of this.boidsOctree.queryElementsFromSphere(
+            new THREE.Sphere(boid.position, this.perceptionRadius)
+        )) {
             if (otherBoid === boid) {
                 continue;
             }
 
             const directionToOther = otherBoid.position.clone().sub(boid.position);
-            const distanceToOther = directionToOther.length();
-            if (
-                distanceToOther < this.perceptionRadius &&
-                directionToOther.angleTo(boid.orientation.forward) < this.viewAngle
-            ) {
+            if (directionToOther.angleTo(boid.orientation.forward) < this.viewAngle) {
                 neighborsCenter.add(otherBoid.position);
                 neighborsCount++;
             }
@@ -297,17 +296,17 @@ export class CohesionBehavior extends BoidBehavior {
 
 export class AlignmentBehavior extends BoidBehavior {
     /**
-     * @param {Array.<Boid>} boidsList
+     * @param {Octree} boidsOctree
      */
     constructor(
-        boidsList = [],
+        boidsOctree,
         desiredVelocity = DEFAULT_DESIRED_VELOCITY,
         perceptionRadius = DEFAULT_PERCEPTION_RADIUS,
         boundingBox = INFINITE_BOX
     ) {
         super(desiredVelocity);
 
-        this.boidsList = boidsList;
+        this.boidsOctree = boidsOctree;
         this.perceptionRadius = perceptionRadius;
         this.boundingBox = boundingBox;
     }
@@ -325,16 +324,14 @@ export class AlignmentBehavior extends BoidBehavior {
         const desiredVelocity = new THREE.Vector3(0, 0, 0);
         let neighborsCount = 0;
 
-        for (const otherBoid of this.boidsList) {
+        for (const otherBoid of this.boidsOctree.queryElementsFromSphere(
+            new THREE.Sphere(boid.position, this.perceptionRadius)
+        )) {
             if (otherBoid === boid) {
                 continue;
             }
-
-            const distanceToOther = otherBoid.position.distanceTo(boid.position);
-            if (distanceToOther < this.perceptionRadius) {
-                desiredVelocity.add(otherBoid.velocity);
-                neighborsCount++;
-            }
+            desiredVelocity.add(otherBoid.velocity);
+            neighborsCount++;
         }
 
         if (neighborsCount > 0) {

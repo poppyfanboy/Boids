@@ -1,8 +1,3 @@
-/**
- * @property {THREE.Vector3} forward
- * @property {THREE.Vector3} up
- * @property {THREE.Vector3} side
- */
 export default class Orientation {
     /**
      * Vectors passed as arguments are *not* cloned inside the constructor.

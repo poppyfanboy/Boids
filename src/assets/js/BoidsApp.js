@@ -12,14 +12,17 @@ import {
     ThrustBehavior,
 } from './BoidBehaviors.js';
 
+import Octree from './util/Octree.js';
+
 const BACKGROUND_COLOR = 0xebce00;
-const BOID_COLOR = 0x6a00db;
+const BOID_COLOR = 0x81049b;
+const OCTREE_COLOR = 0x1528A1;
 
 /**
  * Boids tend to stay inside the bounding box. If they get outside the clipping
  * box, they get sent to the other side of the clipping box.
  */
-const BOUNDING_BOX = new THREE.Box3(new THREE.Vector3(-2, -1, -1), new THREE.Vector3(2, 1, 1));
+const BOUNDING_BOX = new THREE.Box3(new THREE.Vector3(-6, -3, -3), new THREE.Vector3(6, 3, 3));
 const CLIPPING_BOX_EPSILON = 1;
 const CLIPPING_BOX = new THREE.Box3(
     BOUNDING_BOX.min.clone().subScalar(CLIPPING_BOX_EPSILON),
@@ -53,6 +56,8 @@ const FORCES_IMPACTS = {
     thrust: 10.0,
 };
 
+const OCTREE_NODE_CAPACITY = 16;
+
 /**
  * Limit delta time passed to the update function of the app to prevent strange
  * behavior when leaving a tab with the app for some time and then opening it
@@ -60,20 +65,33 @@ const FORCES_IMPACTS = {
  */
 const MAX_DELTA_TIME = 200;
 
-/**
- * @property {Array.<Boid>} boidsList
- */
-export default class BoidsApp {
+export class BoidsAppOptions {
     /**
      * @param {HTMLCanvasElement} canvas
      * @param {THREE.WebGLRenderer} renderer
      * @param {Number} boidsCount
+     * @param {boolean} showOctree
      */
-    constructor(canvas, renderer, boidsCount = 100) {
-        this.boidsCount = Math.max(boidsCount, 0);
+    constructor(canvas, renderer, boidsCount = 100, showOctree = false) {
         this.canvas = canvas;
-
         this.renderer = renderer;
+        this.boidsCount = boidsCount;
+        this.showOctree = showOctree;
+    }
+}
+
+/**
+ * @property {Array.<Boid>} boidsList
+ */
+export class BoidsApp {
+    /**
+     * @param {BoidsAppOptions} options
+     */
+    constructor(options) {
+        this.boidsCount = Math.max(options.boidsCount, 0);
+        this.canvas = options.canvas;
+
+        this.renderer = options.renderer;
         this.renderer.setClearColor(BACKGROUND_COLOR);
 
         this.camera = new THREE.PerspectiveCamera(
@@ -82,13 +100,23 @@ export default class BoidsApp {
             0.1,
             200
         );
-        this.camera.position.set(0, 0, 5);
+        this.camera.position.set(0, 0, 12);
         this.camera.lookAt(0, 0, 0);
 
         this.controls = new OrbitControls(this.camera, this.canvas);
         this.scene = new THREE.Scene();
         this.lastUpdateTime = null;
+
+        /**
+         * @type {Array.<Boid>}
+         */
         this.boidsList = [];
+
+        this.octree = new Octree(CLIPPING_BOX, OCTREE_NODE_CAPACITY, OCTREE_COLOR);
+        this.showOctree = options.showOctree;
+        if (options.showOctree) {
+            this.scene.add(this.octree.mesh);
+        }
     }
 
     run() {
@@ -127,19 +155,19 @@ export default class BoidsApp {
         const avoidBoxEdges = new AvoidBoxEdges(FORCES_IMPACTS.avoidBoxEdges, BOUNDING_BOX);
         const returnInsideBox = new ReturnInsideBox(FORCES_IMPACTS.returnInsideBox, BOUNDING_BOX);
         const separation = new SeparationBehavior(
-            this.boidsList,
+            this.octree,
             FORCES_IMPACTS.separation,
             3 * BOID_SIZE / 2,
             BOUNDING_BOX
         );
         const cohesion = new CohesionBehavior(
-            this.boidsList,
+            this.octree,
             FORCES_IMPACTS.cohesion,
             BOID_PERCEPTION_RADIUS,
             BOUNDING_BOX
         );
         const alignment = new AlignmentBehavior(
-            this.boidsList,
+            this.octree,
             FORCES_IMPACTS.alignment,
             BOID_PERCEPTION_RADIUS,
             BOUNDING_BOX
@@ -207,8 +235,16 @@ export default class BoidsApp {
         deltaTime = Math.min(MAX_DELTA_TIME, deltaTime);
         this.lastUpdateTime = currentTime;
 
+        this.octree.clear();
+        for (const boid of this.boidsList) {
+            this.octree.insert(boid);
+        }
+        if (this.showOctree) {
+            this.octree.updateMesh();
+        }
+
         this.boidsList.forEach((boid) => {
-            return boid.update(deltaTime, this.boidsList);
+            return boid.update(deltaTime);
         });
 
         this.renderer.render(this.scene, this.camera);
