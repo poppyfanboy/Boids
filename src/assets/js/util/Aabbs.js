@@ -10,34 +10,36 @@ const signedUnitVectors = [
 ];
 
 /**
- * Generates signed (it returns the result of subtraction point coordinates from
- * the aabb's min/max coordinates) distances to the given AABB's sides in the
- * following order: min.xyz, max.xyz.
+ * Returns an array of signed (it returns the result of subtraction point
+ * coordinates from the aabb's min/max coordinates) distances to the given
+ * AABB's sides in the following order: min.xyz, max.xyz.
  * @param {THREE.Vector3} point
  * @param {THREE.Box3} aabb
- * @generator
- * @yields {Number}
+ * @returns {Array.<Number>}
  */
-export function *signedDistancesToAabbSides(point, aabb) {
-    for (let i = 0; i < 3; i++) {
-        yield point.getComponent(i) - aabb.min.getComponent(i);
-    }
+export function signedDistancesToAabbSides(point, aabb) {
+    const result = [];
 
     for (let i = 0; i < 3; i++) {
-        yield point.getComponent(i) - aabb.max.getComponent(i);
+        result.push(point.getComponent(i) - aabb.min.getComponent(i));
     }
+    for (let i = 0; i < 3; i++) {
+        result.push(point.getComponent(i) - aabb.max.getComponent(i));
+    }
+    return result;
 }
 
 /**
  * @param {THREE.Vector3} point
  * @param {THREE.Box3} aabb
- * @generator
- * @yields {Number}
+ * @returns {Array.<Number>}
  */
-export function *distancesToAabbSides(point, aabb) {
-    for (const signedDistance of signedDistancesToAabbSides(point, aabb)) {
-        yield Math.abs(signedDistance);
+export function distancesToAabbSides(point, aabb) {
+    const result = signedDistancesToAabbSides(point, aabb);
+    for (let i = 0; i < result.length; i++) {
+        result[i] = Math.abs(result[i]);
     }
+    return result;
 }
 
 /**
@@ -53,18 +55,13 @@ export function vectorToAabbBoundary(point, aabb) {
         return closestPoint.sub(point);
     }
 
-    const distancesIterator = distancesToAabbSides(point, aabb);
-    let minDistance = distancesIterator.next().value;
+    const distances = distancesToAabbSides(point, aabb);
+    let minDistance = distances[0];
     let iMin = 0;
-
-    for (let i = 0; i < signedUnitVectors.length; i++) {
-        const distance = distancesIterator.next();
-        if (distance.done) {
-            break;
-        }
-        if (minDistance > distance.value) {
+    for (let i = 1; i < distances.length; i++) {
+        if (minDistance > distances[i]) {
             iMin = i;
-            minDistance = distance.value;
+            minDistance = distances[i];
         }
     }
 
@@ -85,16 +82,15 @@ export function vectorFromAabbBoundary(point, aabb, epsilonDistance) {
         return new THREE.Vector3();
     }
 
-    let i = 0;
     const resultVector = new THREE.Vector3();
-    for (const signedDistance of signedDistancesToAabbSides(point, aabb)) {
-        if (Math.abs(signedDistance) > epsilonDistance) {
+    const signedDistances = signedDistancesToAabbSides(point, aabb);
+    for (let i = 0; i < signedDistances.length; i++) {
+        if (Math.abs(signedDistances[i]) > epsilonDistance) {
             continue;
         }
         resultVector.add(
-            signedUnitVectors[i].clone().multiplyScalar(signedDistance - epsilonDistance)
+            signedUnitVectors[i].clone().multiplyScalar(signedDistances[i] - epsilonDistance)
         );
-        i++;
     }
 
     return resultVector;
@@ -113,16 +109,15 @@ export function mirrorInsideAabb(point, aabb) {
         return point.clone();
     }
 
-    let i = 0;
     const mirroredVector = new THREE.Vector3();
-    for (const signedDistance of signedDistancesToAabbSides(point, aabb)) {
-        if (i < 3 && signedDistance < 0) {
-            mirroredVector.setComponent(i, -2 * signedDistance);
+    const signedDistances = signedDistancesToAabbSides(point, aabb);
+    for (let i = 0; i < signedDistances.length; i++) {
+        if (i < 3 && signedDistances[i] < 0) {
+            mirroredVector.setComponent(i, -2 * signedDistances[i]);
         }
-        if (i >= 3 && signedDistance > 0) {
-            mirroredVector.setComponent(i % 3, -2 * signedDistance);
+        if (i >= 3 && signedDistances[i] > 0) {
+            mirroredVector.setComponent(i % 3, -2 * signedDistances[i]);
         }
-        i++;
     }
 
     return mirroredVector.add(point);
@@ -148,10 +143,13 @@ export function aabbInsideSphere(aabb, sphere) {
     if (!aabb.containsPoint(sphere.center)) {
         return false;
     }
-    for (const distance of distancesToAabbSides(sphere.center, aabb)) {
-        if (distance > sphere.radius) {
+
+    const distances = distancesToAabbSides(sphere.center, aabb);
+    for (let i = 0; i < distances.length; i++) {
+        if (distances[i] > sphere.radius) {
             return false;
         }
     }
+
     return true;
 }

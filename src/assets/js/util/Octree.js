@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { aabbCenteredAt, aabbInsideSphere } from './Aabbs.js';
 
-const MESH_MAX_POINTS = 50000;
+const MESH_MAX_POINTS = 50_000;
 const BRUTE_FORCE_THRESHOLD = 30;
 
 /**
@@ -82,9 +82,9 @@ class Node {
      * @param {THREE.Box3} boundary
      * @param {Number} capacity
      */
-    constructor(boundary, capacity) {
+    constructor(boundary, depth) {
         this.boundary = boundary;
-        this.capacity = Math.max(1, capacity);
+        this.depth = depth;
         this.isSubdivided = false;
 
         /**
@@ -103,12 +103,12 @@ class Node {
      * @param {TreeElement} element
      * @returns {boolean} if the point was inserted into the tree
      */
-    insert(element) {
+    insert(element, capacity, maxDepth) {
         if (!this.boundary.containsPoint(element.position)) {
             return false;
         }
 
-        if (this.elements.length < this.capacity) {
+        if (this.elements.length < capacity || this.depth === maxDepth) {
             this.elements.push(element);
             this.count++;
             return true;
@@ -116,8 +116,8 @@ class Node {
         if (!this.isSubdivided) {
             this.subdivide();
         }
-        for (const child of this.children) {
-            if (child.insert(element)) {
+        for (let i = 0; i < this.children.length; i++) {
+            if (this.children[i].insert(element, capacity, maxDepth)) {
                 this.count++;
                 return true;
             }
@@ -142,21 +142,21 @@ class Node {
             const normalizedCenter = CHILDREN_CENTERS[i];
             const childCenter = normalizedCenter.clone().multiply(parentSize).add(parentCenter);
             const childBoundary = aabbCenteredAt(childCenter, childSize);
-            this.children[i] = new Node(childBoundary, this.capacity);
+            this.children[i] = new Node(childBoundary, this.depth + 1);
         }
 
         this.isSubdivided = true;
     }
 
-    *boundaries() {
+    boundaries(yieldElement) {
         const nodesToVisit = [ this ];
         while (nodesToVisit.length !== 0) {
-            const currentNode = nodesToVisit.shift();
+            const currentNode = nodesToVisit.pop();
             if (currentNode.isSubdivided) {
                 nodesToVisit.push(...currentNode.children);
             }
             if (currentNode.elements.length > 0 && !currentNode.isSubdivided) {
-                yield currentNode.boundary;
+                yieldElement(currentNode.boundary);
             }
         }
     }
@@ -164,47 +164,51 @@ class Node {
     /**
      * Generates all the points stored in the tree.
      */
-    *getAllElements() {
-        yield* this.elements;
+    getAllElements(yieldElement) {
+        for (let i = 0; i < this.elements; i++) {
+            yieldElement(this.elements[i]);
+        }
 
         if (!this.isSubdivided) {
             return;
         }
 
-        for (const child of this.children) {
-            yield* child.getAllElements();
+        for (let i = 0; i < this.children.length; i++) {
+            if (this.children[i].elements.length > 0) {
+                this.children[i].getAllElements(yieldElement);
+            }
         }
     }
 
     /**
      * @param {THREE.Sphere} sphereRange
      */
-    *queryPointsFromSphere(sphereRange) {
+    queryElementsFromSphere(sphereRange, yieldElement) {
         if (!this.boundary.intersectsSphere(sphereRange)) {
             return;
         }
         if (aabbInsideSphere(this.boundary, sphereRange)) {
-            yield* this.getAllElements();
+            this.getAllElements(yieldElement);
             return;
         }
         if (this.count < BRUTE_FORCE_THRESHOLD) {
-            for (const element of this.getAllElements()) {
+            this.getAllElements((element) => {
                 if (sphereRange.containsPoint(element.position)) {
-                    yield element;
+                    yieldElement(element);
                 }
-            }
+            });
             return;
         }
-        for (const element of this.elements) {
-            if (sphereRange.containsPoint(element.position)) {
-                yield element;
+        for (let i = 0; i < this.elements.length; i++) {
+            if (sphereRange.containsPoint(this.elements[i].position)) {
+                yieldElement(this.elements[i]);
             }
         }
         if (!this.isSubdivided) {
             return;
         }
-        for (const child of this.children) {
-            yield* child.queryPointsFromSphere(sphereRange);
+        for (let i = 0; i < this.children.length; i++) {
+            this.children[i].queryElementsFromSphere(sphereRange, yieldElement);
         }
     }
 }
@@ -216,11 +220,19 @@ export default class Octree {
      * an octree node has more than `nodeCapacity` points, this node is
      * subdivided.
      */
-    constructor(boundary, nodeCapacity = 4, color = 0xffffff, meshMaxPoints = MESH_MAX_POINTS) {
-        this.root = new Node(boundary, nodeCapacity);
+    constructor(
+        boundary,
+        nodeCapacity = 4,
+        maxDepth = 4,
+        color = 0xffffff,
+        meshMaxPoints = MESH_MAX_POINTS
+    ) {
+        this.root = new Node(boundary, 0);
 
         this.color = color;
         this.meshMaxPoints = meshMaxPoints;
+        this.maxDepth = maxDepth;
+        this.nodeCapacity = nodeCapacity;
 
         /**
          * @type {Array.<Number>}
@@ -241,7 +253,7 @@ export default class Octree {
     }
 
     insert(element) {
-        this.root.insert(element);
+        this.root.insert(element, this.nodeCapacity, this.maxDepth);
     }
 
     clear() {
@@ -251,15 +263,14 @@ export default class Octree {
     /**
      * @param {THREE.Sphere} sphereRange
      */
-    *queryElementsFromSphere(sphereRange) {
-        yield* this.root.queryPointsFromSphere(sphereRange);
+    queryElementsFromSphere(sphereRange, callback) {
+        this.root.queryElementsFromSphere(sphereRange, callback);
     }
 
     createNewMesh() {
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(3 * this.meshMaxPoints);
 
-        // worst case, when none of the buffer entries are reused
         this.indices = [];
         geometry.setIndex(this.indices);
 
@@ -280,21 +291,25 @@ export default class Octree {
         }
 
         const positions = this._mesh.geometry.attributes.position.array;
-
         let positionsOffset = 0;
         let indicesOffset = 0;
-        for (const boundary of this.root.boundaries()) {
-            addBoxToBuffer(boundary, positions, positionsOffset, this.indices, indicesOffset);
+
+        this.root.boundaries((boundary) => {
+            addBoxToBuffer(
+                boundary,
+                positions,
+                positionsOffset,
+                this.indices,
+                indicesOffset
+            );
             positionsOffset += 8;
             indicesOffset += 24;
-        }
+        });
 
         this._mesh.geometry.setIndex(this.indices);
         this._mesh.geometry.index.needsUpdate = true;
         this._mesh.geometry.setDrawRange(0, indicesOffset);
         this._mesh.geometry.attributes.position.needsUpdate = true;
         this._mesh.material.needsUpdate = true;
-        this._mesh.geometry.computeBoundingBox();
-        this._mesh.geometry.computeBoundingSphere();
     }
 }

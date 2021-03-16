@@ -10,25 +10,29 @@ import {
     ReturnInsideBox,
     SeparationBehavior,
     ThrustBehavior,
+    SeparationCohesionAlignment,
 } from './BoidBehaviors.js';
 
 import Octree from './util/Octree.js';
 
 const BACKGROUND_COLOR = 0xebce00;
 const BOID_COLOR = 0x81049b;
-const OCTREE_COLOR = 0x1528A1;
+const OCTREE_COLOR = 0x1528a1;
 
 /**
  * Boids tend to stay inside the bounding box. If they get outside the clipping
  * box, they get sent to the other side of the clipping box.
  */
-const BOUNDING_BOX = new THREE.Box3(new THREE.Vector3(-6, -3, -3), new THREE.Vector3(6, 3, 3));
+const BOUNDING_BOX = new THREE.Box3(
+    new THREE.Vector3(-8.75, -8.75 / 2, -8.75 / 2),
+    new THREE.Vector3(8.75, 8.75 / 2, 8.75 / 2)
+);
 const CLIPPING_BOX_EPSILON = 1;
 const CLIPPING_BOX = new THREE.Box3(
     BOUNDING_BOX.min.clone().subScalar(CLIPPING_BOX_EPSILON),
     BOUNDING_BOX.max.clone().addScalar(CLIPPING_BOX_EPSILON)
 );
-const BOID_SIZE = 0.1;
+const BOID_SIZE = 0.12;
 
 const BOID_GEOMETRY = new THREE.ConeBufferGeometry(BOID_SIZE / 2, BOID_SIZE, 8);
 const BOID_MATERIAL = new THREE.MeshPhongMaterial({
@@ -56,7 +60,8 @@ const FORCES_IMPACTS = {
     thrust: 10.0,
 };
 
-const OCTREE_NODE_CAPACITY = 16;
+const OCTREE_NODE_CAPACITY = 32;
+const OCTREE_MAX_DEPTH = 2;
 
 /**
  * Limit delta time passed to the update function of the app to prevent strange
@@ -100,7 +105,7 @@ export class BoidsApp {
             0.1,
             200
         );
-        this.camera.position.set(0, 0, 12);
+        this.camera.position.set(0, 0, 16.5);
         this.camera.lookAt(0, 0, 0);
 
         this.controls = new OrbitControls(this.camera, this.canvas);
@@ -112,7 +117,12 @@ export class BoidsApp {
          */
         this.boidsList = [];
 
-        this.octree = new Octree(CLIPPING_BOX, OCTREE_NODE_CAPACITY, OCTREE_COLOR);
+        this.octree = new Octree(
+            BOUNDING_BOX,
+            OCTREE_NODE_CAPACITY,
+            OCTREE_MAX_DEPTH,
+            OCTREE_COLOR
+        );
         this.showOctree = options.showOctree;
         if (options.showOctree) {
             this.scene.add(this.octree.mesh);
@@ -173,14 +183,18 @@ export class BoidsApp {
             BOUNDING_BOX
         );
         const thrust = new ThrustBehavior(FORCES_IMPACTS.thrust);
+        const separationCohesionAlignment = new SeparationCohesionAlignment(
+            this.octree,
+            separation,
+            cohesion,
+            alignment
+        );
 
         const behaviorsList = [
             avoidBox,
             avoidBoxEdges,
             returnInsideBox,
-            separation,
-            cohesion,
-            alignment,
+            separationCohesionAlignment,
             thrust,
         ];
         const behavior = new CombinedBehavior(behaviorsList, BOID_MAX_FORCE);

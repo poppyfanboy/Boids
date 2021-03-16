@@ -197,7 +197,7 @@ export class SeparationBehavior extends BoidBehavior {
     /**
      * @override
      */
-    update(boid) {
+    update(boid, otherBoids, otherBoidsMaxDistance) {
         this.force.set(0, 0, 0);
 
         if (!this.boundingBox.containsPoint(boid.position)) {
@@ -206,22 +206,37 @@ export class SeparationBehavior extends BoidBehavior {
 
         const desiredVelocity = new THREE.Vector3(0, 0, 0);
         let neighborsCount = 0;
-
-        for (const otherBoid of this.boidsOctree.queryElementsFromSphere(
-            new THREE.Sphere(boid.position, this.perceptionRadius)
-        )) {
+        const updateDesiredVelocity = (otherBoid) => {
             if (otherBoid === boid) {
-                continue;
+                return;
             }
 
             const directionFromOther = boid.position.clone().sub(otherBoid.position);
             const distanceToOther = directionFromOther.length();
-            desiredVelocity.add(
-                directionFromOther
-                    .divideScalar(distanceToOther * distanceToOther)
-                    .multiplyScalar(this.desiredVelocity)
+            if (distanceToOther < this.perceptionRadius) {
+                desiredVelocity.add(
+                    directionFromOther
+                        .divideScalar(distanceToOther * distanceToOther)
+                        .multiplyScalar(this.desiredVelocity)
+                );
+                neighborsCount++;
+            }
+        };
+
+        if (otherBoids === undefined || this.perceptionRadius > otherBoidsMaxDistance) {
+            this.boidsOctree.queryElementsFromSphere(
+                new THREE.Sphere(boid.position, this.perceptionRadius),
+                updateDesiredVelocity
             );
-            neighborsCount++;
+        } else {
+            for (let i = 0; i < otherBoids.length; i++) {
+                if (
+                    otherBoidsMaxDistance === this.perceptionRadius ||
+                    boid.position.distanceTo(otherBoids[i].position) < this.perceptionRadius
+                ) {
+                    updateDesiredVelocity(otherBoids[i]);
+                }
+            }
         }
 
         if (neighborsCount > 0) {
@@ -257,7 +272,7 @@ export class CohesionBehavior extends BoidBehavior {
     /**
      * @override
      */
-    update(boid) {
+    update(boid, otherBoids, otherBoidsMaxDistance) {
         this.force.set(0, 0, 0);
 
         if (!this.boundingBox.containsPoint(boid.position)) {
@@ -266,18 +281,31 @@ export class CohesionBehavior extends BoidBehavior {
 
         const neighborsCenter = new THREE.Vector3(0, 0, 0);
         let neighborsCount = 0;
-
-        for (const otherBoid of this.boidsOctree.queryElementsFromSphere(
-            new THREE.Sphere(boid.position, this.perceptionRadius)
-        )) {
+        const updateNeighborsCenter = (otherBoid) => {
             if (otherBoid === boid) {
-                continue;
+                return;
             }
 
             const directionToOther = otherBoid.position.clone().sub(boid.position);
             if (directionToOther.angleTo(boid.orientation.forward) < this.viewAngle) {
                 neighborsCenter.add(otherBoid.position);
                 neighborsCount++;
+            }
+        };
+
+        if (otherBoids === undefined || this.perceptionRadius > otherBoidsMaxDistance) {
+            this.boidsOctree.queryElementsFromSphere(
+                new THREE.Sphere(boid.position, this.perceptionRadius),
+                updateNeighborsCenter
+            );
+        } else {
+            for (let i = 0; i < otherBoids.length; i++) {
+                if (
+                    otherBoidsMaxDistance === this.perceptionRadius ||
+                    boid.position.distanceTo(otherBoids[i]) < this.perceptionRadius
+                ) {
+                    updateNeighborsCenter(otherBoids[i]);
+                }
             }
         }
 
@@ -314,7 +342,7 @@ export class AlignmentBehavior extends BoidBehavior {
     /**
      * @override
      */
-    update(boid) {
+    update(boid, otherBoids, otherBoidsMaxDistance) {
         this.force.set(0, 0, 0);
 
         if (!this.boundingBox.containsPoint(boid.position)) {
@@ -323,21 +351,80 @@ export class AlignmentBehavior extends BoidBehavior {
 
         const desiredVelocity = new THREE.Vector3(0, 0, 0);
         let neighborsCount = 0;
-
-        for (const otherBoid of this.boidsOctree.queryElementsFromSphere(
-            new THREE.Sphere(boid.position, this.perceptionRadius)
-        )) {
+        const updateDesiredVelocity = (otherBoid) => {
             if (otherBoid === boid) {
-                continue;
+                return;
             }
             desiredVelocity.add(otherBoid.velocity);
             neighborsCount++;
+        };
+
+        if (otherBoids === undefined || this.perceptionRadius > otherBoidsMaxDistance) {
+            this.boidsOctree.queryElementsFromSphere(
+                new THREE.Sphere(boid.position, this.perceptionRadius),
+                updateDesiredVelocity
+            );
+        } else {
+            for (let i = 0; i < otherBoids.length; i++) {
+                if (
+                    otherBoidsMaxDistance === this.perceptionRadius ||
+                    boid.position.distanceTo(otherBoids[i]) < this.perceptionRadius
+                ) {
+                    updateDesiredVelocity(otherBoids[i]);
+                }
+            }
         }
 
         if (neighborsCount > 0) {
             this.force.add(
                 desiredVelocity.divideScalar(neighborsCount).multiplyScalar(this.desiredVelocity)
             );
+        }
+    }
+}
+
+/**
+ * Since separation, cohesion and alignment all query the octree and they all
+ * have almost same perception radii, they can be combined into a single
+ * behavior to reduce the number of calls to the octree.
+ */
+export class SeparationCohesionAlignment extends BoidBehavior {
+    constructor(boidsOctree, separation, cohesion, alignment) {
+        super();
+
+        this.boidsOctree = boidsOctree;
+        this.separation = separation;
+        this.cohesion = cohesion;
+        this.alignment = alignment;
+    }
+
+    update(boid) {
+        this.force.set(0, 0, 0);
+
+        let neighborsCount = 0;
+        const maxPerceptionRadius = Math.max(
+            this.separation.perceptionRadius,
+            Math.max(this.cohesion.perceptionRadius, this.alignment.perceptionRadius)
+        );
+        const neighborBoids = [];
+        this.boidsOctree.queryElementsFromSphere(
+            new THREE.Sphere(boid.position, maxPerceptionRadius),
+            (otherBoid) => {
+                if (otherBoid !== boid) {
+                    neighborBoids.push(otherBoid);
+                    neighborsCount++;
+                }
+            }
+        );
+
+        if (neighborsCount > 0) {
+            this.separation.update(boid, neighborBoids, maxPerceptionRadius);
+            this.cohesion.update(boid, neighborBoids, maxPerceptionRadius);
+            this.alignment.update(boid, neighborBoids, maxPerceptionRadius);
+
+            this.force.add(this.cohesion.force);
+            this.force.add(this.alignment.force);
+            this.force.add(this.separation.force);
         }
     }
 }
