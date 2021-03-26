@@ -1,9 +1,11 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const TerserPlugin = require('terser-webpack-plugin');
 
-module.exports = {
+const config = {
+    mode: 'none',
     entry: {
-        boids: './src/assets/js/index.js',
+        boids: './src/index.ts',
     },
     devServer: {
         contentBase: './dist',
@@ -19,17 +21,44 @@ module.exports = {
         filename: 'index.js',
         path: path.resolve(__dirname, 'dist'),
         clean: true,
+        devtoolModuleFilenameTemplate: 'file:///[absolute-resource-path]',
     },
     module: {
         rules: [
             {
-                test: /\.css$/i,
-                use: [ 'style-loader', 'css-loader' ]
+                test: /\.ts$/,
+                use: 'ts-loader',
+                exclude: /node_modules/,
             },
             {
-                test: /\.(png|svg|jpg|jpeg|gif|vert|frag)$/i,
+                test: /\.css$/i,
+                use: [ 'style-loader', 'css-loader' ],
+            },
+            {
+                test: /\.(png|svg|jpe?g|gif|vert|frag)$/i,
                 type: 'asset/resource',
             },
         ],
     },
+    resolve: {
+        extensions: [ '.js', '.ts', '.d.ts', '.wasm', '.json', '.mjs' ],
+    },
+    optimization: {
+        minimize: false,
+        minimizer: [ new TerserPlugin({
+            parallel: true,
+        }) ],
+    },
+};
+
+module.exports = (env, argv) => {
+    if (argv.mode === 'development') {
+        config.devtool = 'inline-source-map';
+    }
+    if (argv.mode === 'production') {
+        config.optimization.minimize = true;
+        config.optimization.usedExports = true;
+    }
+
+    return config;
 };

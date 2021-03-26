@@ -4,7 +4,7 @@ body {
     height: 100%;
 }
 
-#three-js-canvas {
+.three-js-canvas {
     width: 100%;
     height: 100%;
     display: block;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { Vector3 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { Boid, BoidOptions } from './Boid.js';
+import { Boid, BoidBuilder } from './Boid';
 import {
     CombinedBehavior,
     AlignmentBehavior,
@@ -10,10 +11,10 @@ import {
     ReturnInsideBox,
     SeparationBehavior,
     ThrustBehavior,
-    SeparationCohesionAlignment,
-} from './BoidBehaviors.js';
+    FlockingBehavior,
+} from './BoidBehaviors';
 
-import Octree from './util/Octree.js';
+import Octree from './bvh/Octree';
 
 const BACKGROUND_COLOR = 0xebce00;
 const BOID_COLOR = 0x81049b;
@@ -24,13 +25,13 @@ const OCTREE_COLOR = 0x1528a1;
  * box, they get sent to the other side of the clipping box.
  */
 const BOUNDING_BOX = new THREE.Box3(
-    new THREE.Vector3(-8.75, -8.75 / 2, -8.75 / 2),
-    new THREE.Vector3(8.75, 8.75 / 2, 8.75 / 2)
+    new Vector3(-8.75, -8.75 / 2, -8.75 / 2),
+    new Vector3(8.75, 8.75 / 2, 8.75 / 2),
 );
 const CLIPPING_BOX_EPSILON = 1;
 const CLIPPING_BOX = new THREE.Box3(
     BOUNDING_BOX.min.clone().subScalar(CLIPPING_BOX_EPSILON),
-    BOUNDING_BOX.max.clone().addScalar(CLIPPING_BOX_EPSILON)
+    BOUNDING_BOX.max.clone().addScalar(CLIPPING_BOX_EPSILON),
 );
 const BOID_SIZE = 0.12;
 
@@ -71,28 +72,29 @@ const OCTREE_MAX_DEPTH = 2;
 const MAX_DELTA_TIME = 200;
 
 export class BoidsAppOptions {
-    /**
-     * @param {HTMLCanvasElement} canvas
-     * @param {THREE.WebGLRenderer} renderer
-     * @param {Number} boidsCount
-     * @param {boolean} showOctree
-     */
-    constructor(canvas, renderer, boidsCount = 100, showOctree = false) {
-        this.canvas = canvas;
-        this.renderer = renderer;
-        this.boidsCount = boidsCount;
-        this.showOctree = showOctree;
-    }
+    constructor(
+        public canvas: HTMLCanvasElement,
+        public renderer: THREE.WebGLRenderer,
+        public boidsCount: number = 100,
+    ) {}
 }
 
-/**
- * @property {Array.<Boid>} boidsList
- */
+export class BoidsAppDebugOptions {
+    constructor(public showOctree: boolean = false) {}
+}
+
 export class BoidsApp {
-    /**
-     * @param {BoidsAppOptions} options
-     */
-    constructor(options) {
+    private boidsList: Boid[] = [];
+    private octree: Octree<Boid>;
+    private boidsCount: number;
+    private canvas: HTMLCanvasElement;
+    private renderer: THREE.WebGLRenderer;
+    private camera: THREE.PerspectiveCamera;
+    private controls: OrbitControls;
+    private scene: THREE.Scene;
+    private lastUpdateTime = -1;
+
+    constructor(options: BoidsAppOptions, private debugOptions = new BoidsAppDebugOptions()) {
         this.boidsCount = Math.max(options.boidsCount, 0);
         this.canvas = options.canvas;
 
@@ -103,33 +105,28 @@ export class BoidsApp {
             45,
             this.canvas.clientWidth / this.canvas.clientHeight,
             0.1,
-            200
+            200,
         );
         this.camera.position.set(0, 0, 16.5);
         this.camera.lookAt(0, 0, 0);
 
         this.controls = new OrbitControls(this.camera, this.canvas);
-        this.scene = new THREE.Scene();
-        this.lastUpdateTime = null;
-
-        /**
-         * @type {Array.<Boid>}
-         */
-        this.boidsList = [];
 
         this.octree = new Octree(
             BOUNDING_BOX,
             OCTREE_NODE_CAPACITY,
             OCTREE_MAX_DEPTH,
-            OCTREE_COLOR
+            OCTREE_COLOR,
         );
-        this.showOctree = options.showOctree;
-        if (options.showOctree) {
+
+        this.scene = new THREE.Scene();
+
+        if (this.debugOptions.showOctree) {
             this.scene.add(this.octree.mesh);
         }
     }
 
-    run() {
+    run(): void {
         // Scene setup
         const directionalLight = new THREE.DirectionalLight(0xffffff);
         directionalLight.position.set(1, 4, 4);
@@ -139,13 +136,13 @@ export class BoidsApp {
         const ambientLight = new THREE.AmbientLight(0xffffff);
         this.scene.add(ambientLight);
 
-        const boundingBoxSize = new THREE.Vector3();
+        const boundingBoxSize = new Vector3();
         BOUNDING_BOX.getSize(boundingBoxSize);
 
         const boxGeometry = new THREE.BoxGeometry(
             boundingBoxSize.x,
             boundingBoxSize.y,
-            boundingBoxSize.z
+            boundingBoxSize.z,
         );
         const boxWireframeGeometry = new THREE.EdgesGeometry(boxGeometry);
         const wireframeMaterial = new THREE.LineBasicMaterial({
@@ -160,7 +157,7 @@ export class BoidsApp {
         const avoidBox = new AvoidBox(
             FORCES_IMPACTS.avoidBox,
             BOID_PERCEPTION_RADIUS,
-            BOUNDING_BOX
+            BOUNDING_BOX,
         );
         const avoidBoxEdges = new AvoidBoxEdges(FORCES_IMPACTS.avoidBoxEdges, BOUNDING_BOX);
         const returnInsideBox = new ReturnInsideBox(FORCES_IMPACTS.returnInsideBox, BOUNDING_BOX);
@@ -168,51 +165,51 @@ export class BoidsApp {
             this.octree,
             FORCES_IMPACTS.separation,
             3 * BOID_SIZE / 2,
-            BOUNDING_BOX
+            BOUNDING_BOX,
         );
         const cohesion = new CohesionBehavior(
             this.octree,
             FORCES_IMPACTS.cohesion,
             BOID_PERCEPTION_RADIUS,
-            BOUNDING_BOX
+            BOUNDING_BOX,
         );
         const alignment = new AlignmentBehavior(
             this.octree,
             FORCES_IMPACTS.alignment,
             BOID_PERCEPTION_RADIUS,
-            BOUNDING_BOX
+            BOUNDING_BOX,
         );
         const thrust = new ThrustBehavior(FORCES_IMPACTS.thrust);
-        const separationCohesionAlignment = new SeparationCohesionAlignment(
+        const separationCohesionAlignment = new FlockingBehavior(
             this.octree,
             separation,
             cohesion,
-            alignment
+            alignment,
         );
 
-        const behaviorsList = [
+        const behavior = new CombinedBehavior(
+            BOID_MAX_FORCE,
             avoidBox,
             avoidBoxEdges,
             returnInsideBox,
             separationCohesionAlignment,
             thrust,
-        ];
-        const behavior = new CombinedBehavior(behaviorsList, BOID_MAX_FORCE);
+        );
 
         // Boids setup
         for (let i = 0; i < this.boidsCount; i++) {
-            const position = new THREE.Vector3()
+            const position = new Vector3()
                 .random()
                 .multiply(
                     BOUNDING_BOX.max
                         .clone()
                         .sub(BOUNDING_BOX.min)
-                        .subScalar(2 * BOID_SIZE)
+                        .subScalar(2 * BOID_SIZE),
                 )
                 .add(BOUNDING_BOX.min)
                 .addScalar(BOID_SIZE);
 
-            const velocity = new THREE.Vector3()
+            const velocity = new Vector3()
                 .random()
                 .subScalar(0.5)
                 .multiplyScalar(2 * 0.35);
@@ -220,32 +217,32 @@ export class BoidsApp {
             const mesh = new THREE.Mesh(BOID_GEOMETRY, BOID_MATERIAL);
             this.scene.add(mesh);
 
-            const options = new BoidOptions(mesh)
+            const boid = new BoidBuilder(mesh)
                 .setVelocity(velocity, BOID_MIN_VELOCITY, BOID_MAX_VELOCITY)
                 .setBehavior(behavior, BOID_SIZE, BOID_MASS, CLIPPING_BOX)
-                .setInitialPosition(position);
-
-            this.boidsList.push(new Boid(options));
+                .setInitialPosition(position)
+                .make();
+            this.boidsList.push(boid);
         }
 
         requestAnimationFrame(this.render.bind(this));
     }
 
-    render(currentTime) {
+    render(currentTime: number): void {
         if (
-            this.canvas.width !== this.canvas.clientWidth ||
-            this.canvas.height !== this.canvas.clientHeight
+            this.canvas.width != this.canvas.clientWidth ||
+            this.canvas.height != this.canvas.clientHeight
         ) {
             this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight, false);
             this.camera.aspect = this.canvas.clientWidth / this.canvas.clientHeight;
             this.camera.updateProjectionMatrix();
         }
 
-        if (this.lastUpdateTime === null) {
+        if (this.lastUpdateTime == null) {
             this.lastUpdateTime = currentTime;
         }
 
-        let deltaTime = currentTime - this.lastUpdateTime;
+        let deltaTime: number = currentTime - this.lastUpdateTime;
         deltaTime = Math.min(MAX_DELTA_TIME, deltaTime);
         this.lastUpdateTime = currentTime;
 
@@ -253,13 +250,13 @@ export class BoidsApp {
         for (const boid of this.boidsList) {
             this.octree.insert(boid);
         }
-        if (this.showOctree) {
+        if (this.debugOptions.showOctree) {
             this.octree.updateMesh();
         }
 
-        this.boidsList.forEach((boid) => {
-            return boid.update(deltaTime);
-        });
+        for (let i = 0; i < this.boidsList.length; i++) {
+            this.boidsList[i].update(deltaTime);
+        }
 
         this.renderer.render(this.scene, this.camera);
         this.controls.update();

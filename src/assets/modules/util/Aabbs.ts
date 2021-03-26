@@ -1,24 +1,22 @@
 import * as THREE from 'three';
+import { Vector3 } from 'three';
 
-const signedUnitVectors = [
-    new THREE.Vector3(-1, 0, 0),
-    new THREE.Vector3(0, -1, 0),
-    new THREE.Vector3(0, 0, -1),
-    new THREE.Vector3(1, 0, 0),
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 0, 1),
+const signedUnitVectors: Vector3[] = [
+    new Vector3(-1, 0, 0),
+    new Vector3(0, -1, 0),
+    new Vector3(0, 0, -1),
+    new Vector3(1, 0, 0),
+    new Vector3(0, 1, 0),
+    new Vector3(0, 0, 1),
 ];
 
 /**
  * Returns an array of signed (it returns the result of subtraction point
  * coordinates from the aabb's min/max coordinates) distances to the given
  * AABB's sides in the following order: min.xyz, max.xyz.
- * @param {THREE.Vector3} point
- * @param {THREE.Box3} aabb
- * @returns {Array.<Number>}
  */
-export function signedDistancesToAabbSides(point, aabb) {
-    const result = [];
+export function signedDistancesToAabbSides(point: Vector3, aabb: THREE.Box3): number[] {
+    const result: number[] = [];
 
     for (let i = 0; i < 3; i++) {
         result.push(point.getComponent(i) - aabb.min.getComponent(i));
@@ -29,13 +27,8 @@ export function signedDistancesToAabbSides(point, aabb) {
     return result;
 }
 
-/**
- * @param {THREE.Vector3} point
- * @param {THREE.Box3} aabb
- * @returns {Array.<Number>}
- */
-export function distancesToAabbSides(point, aabb) {
-    const result = signedDistancesToAabbSides(point, aabb);
+export function distancesToAabbSides(point: Vector3, aabb: THREE.Box3): number[] {
+    const result: number[] = signedDistancesToAabbSides(point, aabb);
     for (let i = 0; i < result.length; i++) {
         result[i] = Math.abs(result[i]);
     }
@@ -43,20 +36,18 @@ export function distancesToAabbSides(point, aabb) {
 }
 
 /**
- * Returns a vector pointing to the closest point on the surface of the given AABB.
- * @param {THREE.Vector3} point
- * @param {THREE.Box3} aabb
- * @returns {THREE.Vector3}
+ * Returns a vector pointing to the closest point on the surface of the given
+ * AABB.
  */
-export function vectorToAabbBoundary(point, aabb) {
+export function vectorToAabbBoundary(point: Vector3, aabb: THREE.Box3): Vector3 {
     if (!aabb.containsPoint(point)) {
-        const closestPoint = point.clone();
+        const closestPoint: Vector3 = point.clone();
         aabb.clampPoint(point, closestPoint);
         return closestPoint.sub(point);
     }
 
-    const distances = distancesToAabbSides(point, aabb);
-    let minDistance = distances[0];
+    const distances: number[] = distancesToAabbSides(point, aabb);
+    let minDistance: number = distances[0];
     let iMin = 0;
     for (let i = 1; i < distances.length; i++) {
         if (minDistance > distances[i]) {
@@ -72,24 +63,26 @@ export function vectorToAabbBoundary(point, aabb) {
  * Returns a vector pointing inside the AABB (adding the returned vector
  * to the `point` argument will result in point being away from each
  * side of the AABB at least by `epsilonDistance` distance).
- * In case `point` is not inside / on the boundary of the AABB, returns a 0-vector.
- * @param {THREE.Vector3} point
- * @param {THREE.Box3} aabb
- * @returns {THREE.Vector3}
+ * In case `point` is not inside / on the boundary of the AABB, returns a
+ * 0-vector.
  */
-export function vectorFromAabbBoundary(point, aabb, epsilonDistance) {
+export function vectorFromAabbBoundary(
+    point: Vector3,
+    aabb: THREE.Box3,
+    epsilonDistance: number,
+): Vector3 {
     if (!aabb.containsPoint(point)) {
-        return new THREE.Vector3();
+        return new Vector3();
     }
 
-    const resultVector = new THREE.Vector3();
-    const signedDistances = signedDistancesToAabbSides(point, aabb);
+    const resultVector = new Vector3();
+    const signedDistances: number[] = signedDistancesToAabbSides(point, aabb);
     for (let i = 0; i < signedDistances.length; i++) {
         if (Math.abs(signedDistances[i]) > epsilonDistance) {
             continue;
         }
         resultVector.add(
-            signedUnitVectors[i].clone().multiplyScalar(signedDistances[i] - epsilonDistance)
+            signedUnitVectors[i].clone().multiplyScalar(signedDistances[i] - epsilonDistance),
         );
     }
 
@@ -100,17 +93,14 @@ export function vectorFromAabbBoundary(point, aabb, epsilonDistance) {
  * If the given point is outside the AABB, the function maps it back inside
  * the AABB. If the point goes off the AABB from one side, it appears on the
  * other side.
- * @param {THREE.Vector3} point
- * @param {THREE.Box3} aabb
- * @returns {THREE.Vector3}
  */
-export function mirrorInsideAabb(point, aabb) {
+export function mirrorInsideAabb(point: Vector3, aabb: THREE.Box3): Vector3 {
     if (aabb.containsPoint(point)) {
         return point.clone();
     }
 
-    const mirroredVector = new THREE.Vector3();
-    const signedDistances = signedDistancesToAabbSides(point, aabb);
+    const mirroredVector = new Vector3();
+    const signedDistances: number[] = signedDistancesToAabbSides(point, aabb);
     for (let i = 0; i < signedDistances.length; i++) {
         if (i < 3 && signedDistances[i] < 0) {
             mirroredVector.setComponent(i, -2 * signedDistances[i]);
@@ -125,26 +115,20 @@ export function mirrorInsideAabb(point, aabb) {
 
 /**
  * Creates a new AABB with the given parameters.
- * @param {THREE.Vector3} center
- * @param {THREE.Vector3} size
  */
-export function aabbCenteredAt(center, size) {
-    const halfSize = size.clone().divideScalar(2);
-    const min = center.clone().sub(halfSize);
-    const max = center.clone().add(halfSize);
+export function aabbCenteredAt(center: Vector3, size: Vector3): THREE.Box3 {
+    const halfSize: Vector3 = size.clone().divideScalar(2);
+    const min: Vector3 = center.clone().sub(halfSize);
+    const max: Vector3 = center.clone().add(halfSize);
     return new THREE.Box3(min, max);
 }
 
-/**
- * @param {THREE.Box3} aabb
- * @param {THREE.Sphere} sphere
- */
-export function aabbInsideSphere(aabb, sphere) {
+export function aabbInsideSphere(aabb: THREE.Box3, sphere: THREE.Sphere): boolean {
     if (!aabb.containsPoint(sphere.center)) {
         return false;
     }
 
-    const distances = distancesToAabbSides(sphere.center, aabb);
+    const distances: number[] = distancesToAabbSides(sphere.center, aabb);
     for (let i = 0; i < distances.length; i++) {
         if (distances[i] > sphere.radius) {
             return false;

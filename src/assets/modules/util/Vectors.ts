@@ -1,8 +1,10 @@
+import { Vector } from 'three';
+
 /**
  * Assumes that the passed object is a vector with [x, [y, [z, [w]]]] properties
  * defined and tries to guess its size.
  */
-function getComponentsCount(vector) {
+function getComponentsCount(vector: Vector) {
     let componentsCount = 0;
 
     if ('x' in vector) {
@@ -29,19 +31,15 @@ function getComponentsCount(vector) {
     return componentsCount;
 }
 
-/**
- * @param {THREE.Vector} vector
- * @param {Number} componentsCount
- */
-export function maxComponent(vector, componentsCount) {
-    if (componentsCount === undefined) {
+export function maxComponent(vector: Vector, componentsCount?: number): number {
+    if (componentsCount == null) {
         componentsCount = getComponentsCount(vector);
     }
     if (componentsCount <= 0) {
-        return null;
+        return Number.NaN;
     }
 
-    let max = vector.getComponent(0);
+    let max: number = vector.getComponent(0);
     for (let i = 1; i < componentsCount; i++) {
         if (vector.getComponent(i) > max) {
             max = vector.getComponent(i);
@@ -50,19 +48,15 @@ export function maxComponent(vector, componentsCount) {
     return max;
 }
 
-/**
- * @param {THREE.Vector} vector
- * @param {Number} componentsCount
- */
-export function minComponent(vector, componentsCount) {
-    if (componentsCount === undefined) {
+export function minComponent(vector: Vector, componentsCount?: number): number {
+    if (componentsCount == null) {
         componentsCount = getComponentsCount(vector);
     }
     if (componentsCount <= 0) {
-        return null;
+        return Number.NaN;
     }
 
-    let min = vector.getComponent(0);
+    let min: number = vector.getComponent(0);
     for (let i = 1; i < componentsCount; i++) {
         if (vector.getComponent(i) < min) {
             min = vector.getComponent(i);
