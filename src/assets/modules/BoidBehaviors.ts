@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Vector3 } from 'three';
 import { Boid } from './Boid';
 import { mirrorInsideAabb, vectorToAabbBoundary } from './util/Aabbs';
-import Octree from './bvh/Octree';
+import { Bvh } from './bvh/Bvh';
 
 const DEFAULT_DESIRED_VELOCITY = 1;
 const DEFAULT_PERCEPTION_RADIUS = 1;
@@ -180,7 +180,7 @@ export type FlockingBehaviorArgs = {
  */
 export class SeparationBehavior extends BoidBehavior<FlockingBehaviorArgs> {
     constructor(
-        private boidsOctree: Octree<Boid>,
+        private boidsBvh: Bvh<Boid>,
         desiredVelocity = DEFAULT_DESIRED_VELOCITY,
         private _perceptionRadius = DEFAULT_PERCEPTION_RADIUS,
         private boundingBox = INFINITE_BOX,
@@ -215,7 +215,7 @@ export class SeparationBehavior extends BoidBehavior<FlockingBehaviorArgs> {
         };
 
         if (args == null || this._perceptionRadius > args.otherBoidsMaxDistance) {
-            this.boidsOctree.queryElementsFromSphere(
+            this.boidsBvh.queryItemsFromSphere(
                 new THREE.Sphere(boid.position, this._perceptionRadius),
                 updateDesiredVelocity,
             );
@@ -247,7 +247,7 @@ export class SeparationBehavior extends BoidBehavior<FlockingBehaviorArgs> {
  */
 export class CohesionBehavior extends BoidBehavior<FlockingBehaviorArgs> {
     constructor(
-        private boidsOctree: Octree<Boid>,
+        private boidsBvh: Bvh<Boid>,
         desiredVelocity = DEFAULT_DESIRED_VELOCITY,
         private _perceptionRadius = DEFAULT_PERCEPTION_RADIUS,
         private boundingBox = INFINITE_BOX,
@@ -278,7 +278,7 @@ export class CohesionBehavior extends BoidBehavior<FlockingBehaviorArgs> {
         };
 
         if (args == null || this._perceptionRadius > args.otherBoidsMaxDistance) {
-            this.boidsOctree.queryElementsFromSphere(
+            this.boidsBvh.queryItemsFromSphere(
                 new THREE.Sphere(boid.position, this._perceptionRadius),
                 updateNeighborsCenter,
             );
@@ -312,7 +312,7 @@ export class CohesionBehavior extends BoidBehavior<FlockingBehaviorArgs> {
 
 export class AlignmentBehavior extends BoidBehavior<FlockingBehaviorArgs> {
     constructor(
-        private boidsOctree: Octree<Boid>,
+        private boidsBvh: Bvh<Boid>,
         desiredVelocity = DEFAULT_DESIRED_VELOCITY,
         private _perceptionRadius = DEFAULT_PERCEPTION_RADIUS,
         private boundingBox = INFINITE_BOX,
@@ -338,7 +338,7 @@ export class AlignmentBehavior extends BoidBehavior<FlockingBehaviorArgs> {
         };
 
         if (args == null || this._perceptionRadius > args.otherBoidsMaxDistance) {
-            this.boidsOctree.queryElementsFromSphere(
+            this.boidsBvh.queryItemsFromSphere(
                 new THREE.Sphere(boid.position, this._perceptionRadius),
                 updateDesiredVelocity,
             );
@@ -366,13 +366,13 @@ export class AlignmentBehavior extends BoidBehavior<FlockingBehaviorArgs> {
 }
 
 /**
- * Since separation, cohesion and alignment all query the octree and they all
+ * Since separation, cohesion and alignment all query the BVH and they all
  * have almost same perception radii, they can be combined into a single
- * behavior to reduce the number of calls to the octree.
+ * behavior to reduce the number of calls to the BVH.
  */
 export class FlockingBehavior extends BoidBehavior {
     constructor(
-        private boidsOctree: Octree<Boid>,
+        private boidsBvh: Bvh<Boid>,
         private separation: SeparationBehavior,
         private cohesion: CohesionBehavior,
         private alignment: AlignmentBehavior,
@@ -389,7 +389,7 @@ export class FlockingBehavior extends BoidBehavior {
             Math.max(this.cohesion.perceptionRadius, this.alignment.perceptionRadius),
         );
         const neighborBoids: Boid[] = [];
-        this.boidsOctree.queryElementsFromSphere(
+        this.boidsBvh.queryItemsFromSphere(
             new THREE.Sphere(boid.position, maxPerceptionRadius),
             (otherBoid: Boid) => {
                 if (otherBoid != boid) {
@@ -412,11 +412,15 @@ export class FlockingBehavior extends BoidBehavior {
                 otherBoids: neighborBoids,
                 otherBoidsMaxDistance: maxPerceptionRadius,
             });
-
-            this._force.add(this.cohesion.force);
-            this._force.add(this.alignment.force);
-            this._force.add(this.separation.force);
+        } else if (neighborsCount == -1) {
+            this.separation.update(boid);
+            this.cohesion.update(boid);
+            this.alignment.update(boid);
         }
+
+        this._force.add(this.cohesion.force);
+        this._force.add(this.alignment.force);
+        this._force.add(this.separation.force);
     }
 }
 

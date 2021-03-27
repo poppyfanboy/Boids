@@ -1,6 +1,7 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
+const webpack = require('webpack');
 
 const config = {
     mode: 'none',
@@ -54,10 +55,16 @@ const config = {
 module.exports = (env, argv) => {
     if (argv.mode === 'development') {
         config.devtool = 'inline-source-map';
+        config.plugins.push(new webpack.DefinePlugin({
+            'process.env.DEV': JSON.stringify(true),
+        }));
     }
     if (argv.mode === 'production') {
         config.optimization.minimize = true;
         config.optimization.usedExports = true;
+        config.plugins.push(new webpack.DefinePlugin({
+            'process.env.DEV': JSON.stringify(false),
+        }));
     }
 
     return config;

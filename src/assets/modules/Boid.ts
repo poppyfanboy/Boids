@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { Vector3 } from 'three';
 import { lineVsAabb, LineIntersectionPoint } from './util/Collisions';
 import { vectorToAabbBoundary, vectorFromAabbBoundary } from './util/Aabbs';
-import Orientation from './util/Orientation';
+import { Orientation } from './util/Orientation';
 import { BoidBehavior, DummyBehavior } from './BoidBehaviors';
+import { BinaryBvhItem, ItemData, Node } from './bvh/BinaryBvh';
 
 /**
  * After a boid is wrapped on the other side of the clipping AABB, it is brought
@@ -80,7 +81,12 @@ export class BoidBuilder {
     }
 }
 
-export class Boid {
+export class Boid implements BinaryBvhItem<Boid> {
+    itemData: ItemData<Boid> = {
+        nextItem: null,
+        ownerNode: null,
+    };
+
     constructor(
         private _position: Vector3,
         private _velocity: Vector3,

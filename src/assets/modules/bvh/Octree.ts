@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Vector3 } from 'three';
 import { aabbCenteredAt, aabbInsideSphere } from '../util/Aabbs';
+import { BvhItem, Bvh } from './Bvh';
 
 const MESH_MAX_POINTS = 50_000;
 const BRUTE_FORCE_THRESHOLD = 30;
@@ -70,28 +71,24 @@ const CHILDREN_CENTERS: Vector3[] = Array.from({ length: 8 }, (_, i) =>
     ).multiplyScalar(0.25),
 );
 
-export interface TreeElement {
-    position: Vector3;
-}
-
-class Node<TElement extends TreeElement> {
+class Node<TItem extends BvhItem> {
     private isSubdivided = false;
-    private elements: TElement[] = [];
+    private items: TItem[] = [];
     private count = 0;
-    private children: Node<TElement>[] = [];
+    private children: Node<TItem>[] = [];
 
     constructor(private boundary: THREE.Box3, private depth: number) {}
 
     /**
      * @returns if the point was inserted into the tree
      */
-    insert(element: TElement, capacity: number, maxDepth: number): boolean {
-        if (!this.boundary.containsPoint(element.position)) {
+    insert(item: TItem, capacity: number, maxDepth: number): boolean {
+        if (!this.boundary.containsPoint(item.position)) {
             return false;
         }
 
-        if (this.elements.length < capacity || this.depth == maxDepth) {
-            this.elements.push(element);
+        if (this.items.length < capacity || this.depth == maxDepth) {
+            this.items.push(item);
             this.count++;
             return true;
         }
@@ -99,7 +96,7 @@ class Node<TElement extends TreeElement> {
             this.subdivide();
         }
         for (let i = 0; i < this.children.length; i++) {
-            if (this.children[i]?.insert(element, capacity, maxDepth)) {
+            if (this.children[i].insert(item, capacity, maxDepth)) {
                 this.count++;
                 return true;
             }
@@ -110,7 +107,7 @@ class Node<TElement extends TreeElement> {
     clear(): void {
         this.children = [];
         this.isSubdivided = false;
-        this.elements = [];
+        this.items = [];
     }
 
     subdivide(): void {
@@ -133,14 +130,14 @@ class Node<TElement extends TreeElement> {
         this.isSubdivided = true;
     }
 
-    boundaries(yieldBoundary: (boundary: THREE.Box3) => void) {
-        const nodesToVisit: Node<TElement>[] = [ this ];
-        let currentNode: Node<TElement> | undefined = undefined;
+    boundaries(yieldBoundary: (boundary: THREE.Box3) => void): void {
+        const nodesToVisit: Node<TItem>[] = [ this ];
+        let currentNode: Node<TItem> | undefined = undefined;
         while ((currentNode = nodesToVisit.pop()) != undefined) {
             if (currentNode.isSubdivided) {
                 nodesToVisit.push(...currentNode.children);
             }
-            if (currentNode.elements.length > 0 && !currentNode.isSubdivided) {
+            if (currentNode.items.length > 0 && !currentNode.isSubdivided) {
                 yieldBoundary(currentNode.boundary);
             }
         }
@@ -149,9 +146,9 @@ class Node<TElement extends TreeElement> {
     /**
      * Generates all the points stored in the tree.
      */
-    getAllElements(yieldElement: (element: TElement) => void) {
-        for (let i = 0; i < this.elements.length; i++) {
-            yieldElement(this.elements[i]);
+    getAllItems(yieldItem: (item: TItem) => void): void {
+        for (let i = 0; i < this.items.length; i++) {
+            yieldItem(this.items[i]);
         }
 
         if (!this.isSubdivided) {
@@ -159,38 +156,38 @@ class Node<TElement extends TreeElement> {
         }
 
         for (let i = 0; i < this.children.length; i++) {
-            if (this.children[i].elements.length > 0) {
-                this.children[i].getAllElements(yieldElement);
+            if (this.children[i].items.length > 0) {
+                this.children[i].getAllItems(yieldItem);
             }
         }
     }
 
-    queryElementsFromSphere(sphereRange: THREE.Sphere, yieldElement: (element: TElement) => void) {
+    queryItemsFromSphere(sphereRange: THREE.Sphere, yieldItem: (item: TItem) => void): void {
         if (!this.boundary.intersectsSphere(sphereRange)) {
             return;
         }
         if (aabbInsideSphere(this.boundary, sphereRange)) {
-            this.getAllElements(yieldElement);
+            this.getAllItems(yieldItem);
             return;
         }
         if (this.count < BRUTE_FORCE_THRESHOLD) {
-            this.getAllElements(element => {
-                if (sphereRange.containsPoint(element.position)) {
-                    yieldElement(element);
+            this.getAllItems(item => {
+                if (sphereRange.containsPoint(item.position)) {
+                    yieldItem(item);
                 }
             });
             return;
         }
-        for (let i = 0; i < this.elements.length; i++) {
-            if (sphereRange.containsPoint(this.elements[i].position)) {
-                yieldElement(this.elements[i]);
+        for (let i = 0; i < this.items.length; i++) {
+            if (sphereRange.containsPoint(this.items[i].position)) {
+                yieldItem(this.items[i]);
             }
         }
         if (!this.isSubdivided) {
             return;
         }
         for (let i = 0; i < this.children.length; i++) {
-            this.children[i].queryElementsFromSphere(sphereRange, yieldElement);
+            this.children[i].queryItemsFromSphere(sphereRange, yieldItem);
         }
     }
 }
@@ -202,8 +199,8 @@ type OctreeMeshData = {
     mesh: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null;
 };
 
-export default class Octree<TElement extends TreeElement> {
-    private root: Node<TElement>;
+export class Octree<TItem extends BvhItem> implements Bvh<TItem> {
+    private root: Node<TItem>;
     private maxDepth: number;
     private nodeCapacity: number;
     private meshData: OctreeMeshData;
@@ -232,26 +229,26 @@ export default class Octree<TElement extends TreeElement> {
         };
     }
 
-    get mesh(): THREE.LineSegments {
+    get mesh(): THREE.Object3D {
         if (this.meshData.mesh == null) {
             this.meshData.mesh = this.createNewMesh();
         }
         return this.meshData.mesh;
     }
 
-    insert(element: TElement): boolean {
-        return this.root.insert(element, this.nodeCapacity, this.maxDepth);
+    insert(item: TItem): void {
+        this.root.insert(item, this.nodeCapacity, this.maxDepth);
     }
 
     clear(): void {
         this.root.clear();
     }
 
-    queryElementsFromSphere(
+    queryItemsFromSphere(
         sphereRange: THREE.Sphere,
-        yieldElement: (element: TElement) => void,
+        yieldItem: (item: TItem) => void,
     ): void {
-        this.root.queryElementsFromSphere(sphereRange, yieldElement);
+        this.root.queryItemsFromSphere(sphereRange, yieldItem);
     }
 
     createNewMesh(): THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> {

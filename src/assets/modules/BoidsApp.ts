@@ -13,8 +13,10 @@ import {
     ThrustBehavior,
     FlockingBehavior,
 } from './BoidBehaviors';
+import { Bvh } from './bvh/Bvh';
 
-import Octree from './bvh/Octree';
+import { Octree } from './bvh/Octree';
+import { BinaryBvh } from './bvh/BinaryBvh';
 
 const BACKGROUND_COLOR = 0xebce00;
 const BOID_COLOR = 0x81049b;
@@ -71,11 +73,17 @@ const OCTREE_MAX_DEPTH = 2;
  */
 const MAX_DELTA_TIME = 200;
 
+export enum BvhType {
+    OCTREE,
+    BINARY_BVH,
+}
+
 export class BoidsAppOptions {
     constructor(
         public canvas: HTMLCanvasElement,
         public renderer: THREE.WebGLRenderer,
         public boidsCount: number = 100,
+        public bvhType: BvhType = BvhType.OCTREE,
     ) {}
 }
 
@@ -85,7 +93,8 @@ export class BoidsAppDebugOptions {
 
 export class BoidsApp {
     private boidsList: Boid[] = [];
-    private octree: Octree<Boid>;
+    private bvh: Bvh<Boid>;
+    private bvhType: BvhType;
     private boidsCount: number;
     private canvas: HTMLCanvasElement;
     private renderer: THREE.WebGLRenderer;
@@ -112,17 +121,21 @@ export class BoidsApp {
 
         this.controls = new OrbitControls(this.camera, this.canvas);
 
-        this.octree = new Octree(
-            BOUNDING_BOX,
-            OCTREE_NODE_CAPACITY,
-            OCTREE_MAX_DEPTH,
-            OCTREE_COLOR,
-        );
-
         this.scene = new THREE.Scene();
 
+        this.bvhType = options.bvhType;
+        if (options.bvhType == BvhType.OCTREE) {
+            this.bvh = new Octree<Boid>(
+                BOUNDING_BOX,
+                OCTREE_NODE_CAPACITY,
+                OCTREE_MAX_DEPTH,
+                OCTREE_COLOR,
+            );
+        } else {
+            this.bvh = new BinaryBvh<Boid>();
+        }
         if (this.debugOptions.showOctree) {
-            this.scene.add(this.octree.mesh);
+            this.scene.add(this.bvh.mesh);
         }
     }
 
@@ -162,26 +175,26 @@ export class BoidsApp {
         const avoidBoxEdges = new AvoidBoxEdges(FORCES_IMPACTS.avoidBoxEdges, BOUNDING_BOX);
         const returnInsideBox = new ReturnInsideBox(FORCES_IMPACTS.returnInsideBox, BOUNDING_BOX);
         const separation = new SeparationBehavior(
-            this.octree,
+            this.bvh,
             FORCES_IMPACTS.separation,
             3 * BOID_SIZE / 2,
             BOUNDING_BOX,
         );
         const cohesion = new CohesionBehavior(
-            this.octree,
+            this.bvh,
             FORCES_IMPACTS.cohesion,
             BOID_PERCEPTION_RADIUS,
             BOUNDING_BOX,
         );
         const alignment = new AlignmentBehavior(
-            this.octree,
+            this.bvh,
             FORCES_IMPACTS.alignment,
             BOID_PERCEPTION_RADIUS,
             BOUNDING_BOX,
         );
         const thrust = new ThrustBehavior(FORCES_IMPACTS.thrust);
         const separationCohesionAlignment = new FlockingBehavior(
-            this.octree,
+            this.bvh,
             separation,
             cohesion,
             alignment,
@@ -223,6 +236,7 @@ export class BoidsApp {
                 .setInitialPosition(position)
                 .make();
             this.boidsList.push(boid);
+            this.bvh.insert(boid);
         }
 
         requestAnimationFrame(this.render.bind(this));
@@ -246,12 +260,18 @@ export class BoidsApp {
         deltaTime = Math.min(MAX_DELTA_TIME, deltaTime);
         this.lastUpdateTime = currentTime;
 
-        this.octree.clear();
-        for (const boid of this.boidsList) {
-            this.octree.insert(boid);
+        if (this.bvhType == BvhType.BINARY_BVH) {
+            const binaryBvh = this.bvh as BinaryBvh<Boid>;
+            binaryBvh.rebuild();
+        } else if (this.bvhType == BvhType.OCTREE) {
+            this.bvh.clear();
+            for (let i = 0; i < this.boidsList.length; i++) {
+                this.bvh.insert(this.boidsList[i]);
+            }
         }
+
         if (this.debugOptions.showOctree) {
-            this.octree.updateMesh();
+            this.bvh.updateMesh();
         }
 
         for (let i = 0; i < this.boidsList.length; i++) {

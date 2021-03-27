@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Vector3 } from 'three';
+import { Vector3, Box3 } from 'three';
 
 const signedUnitVectors: Vector3[] = [
     new Vector3(-1, 0, 0),
@@ -15,7 +15,7 @@ const signedUnitVectors: Vector3[] = [
  * coordinates from the aabb's min/max coordinates) distances to the given
  * AABB's sides in the following order: min.xyz, max.xyz.
  */
-export function signedDistancesToAabbSides(point: Vector3, aabb: THREE.Box3): number[] {
+export function signedDistancesToAabbSides(point: Vector3, aabb: Box3): number[] {
     const result: number[] = [];
 
     for (let i = 0; i < 3; i++) {
@@ -27,7 +27,7 @@ export function signedDistancesToAabbSides(point: Vector3, aabb: THREE.Box3): nu
     return result;
 }
 
-export function distancesToAabbSides(point: Vector3, aabb: THREE.Box3): number[] {
+export function distancesToAabbSides(point: Vector3, aabb: Box3): number[] {
     const result: number[] = signedDistancesToAabbSides(point, aabb);
     for (let i = 0; i < result.length; i++) {
         result[i] = Math.abs(result[i]);
@@ -39,7 +39,7 @@ export function distancesToAabbSides(point: Vector3, aabb: THREE.Box3): number[]
  * Returns a vector pointing to the closest point on the surface of the given
  * AABB.
  */
-export function vectorToAabbBoundary(point: Vector3, aabb: THREE.Box3): Vector3 {
+export function vectorToAabbBoundary(point: Vector3, aabb: Box3): Vector3 {
     if (!aabb.containsPoint(point)) {
         const closestPoint: Vector3 = point.clone();
         aabb.clampPoint(point, closestPoint);
@@ -68,7 +68,7 @@ export function vectorToAabbBoundary(point: Vector3, aabb: THREE.Box3): Vector3 
  */
 export function vectorFromAabbBoundary(
     point: Vector3,
-    aabb: THREE.Box3,
+    aabb: Box3,
     epsilonDistance: number,
 ): Vector3 {
     if (!aabb.containsPoint(point)) {
@@ -94,7 +94,7 @@ export function vectorFromAabbBoundary(
  * the AABB. If the point goes off the AABB from one side, it appears on the
  * other side.
  */
-export function mirrorInsideAabb(point: Vector3, aabb: THREE.Box3): Vector3 {
+export function mirrorInsideAabb(point: Vector3, aabb: Box3): Vector3 {
     if (aabb.containsPoint(point)) {
         return point.clone();
     }
@@ -116,14 +116,14 @@ export function mirrorInsideAabb(point: Vector3, aabb: THREE.Box3): Vector3 {
 /**
  * Creates a new AABB with the given parameters.
  */
-export function aabbCenteredAt(center: Vector3, size: Vector3): THREE.Box3 {
+export function aabbCenteredAt(center: Vector3, size: Vector3): Box3 {
     const halfSize: Vector3 = size.clone().divideScalar(2);
     const min: Vector3 = center.clone().sub(halfSize);
     const max: Vector3 = center.clone().add(halfSize);
-    return new THREE.Box3(min, max);
+    return new Box3(min, max);
 }
 
-export function aabbInsideSphere(aabb: THREE.Box3, sphere: THREE.Sphere): boolean {
+export function aabbInsideSphere(aabb: Box3, sphere: THREE.Sphere): boolean {
     if (!aabb.containsPoint(sphere.center)) {
         return false;
     }

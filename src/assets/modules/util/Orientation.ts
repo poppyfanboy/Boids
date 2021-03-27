@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 
-export default class Orientation {
+export class Orientation {
     private _forward: Vector3;
     private _up: Vector3;
     private _side: Vector3;
