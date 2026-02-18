@@ -124,10 +124,6 @@ export function aabbCenteredAt(center: Vector3, size: Vector3): Box3 {
 }
 
 export function aabbInsideSphere(aabb: Box3, sphere: THREE.Sphere): boolean {
-    if (!aabb.containsPoint(sphere.center)) {
-        return false;
-    }
-
     // Calculate distance from the sphere center to the furthest AABB point.
     const maxDistanceX = Math.max(Math.abs(sphere.center.x - aabb.min.x), Math.abs(sphere.center.x - aabb.max.x));
     const maxDistanceY = Math.max(Math.abs(sphere.center.y - aabb.min.y), Math.abs(sphere.center.y - aabb.max.y));
