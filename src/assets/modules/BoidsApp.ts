@@ -18,8 +18,8 @@ import { Bvh } from './bvh/Bvh';
 import { Octree } from './bvh/Octree';
 import { BinaryBvh } from './bvh/BinaryBvh';
 
-const BACKGROUND_COLOR = 0xebce00;
-const BOID_COLOR = 0x81049b;
+const BACKGROUND_COLOR = 0xfdf2f8;
+const BOID_COLOR = 0x7e9cad;
 const OCTREE_COLOR = 0x1528a1;
 
 /**
@@ -37,7 +37,7 @@ const CLIPPING_BOX = new THREE.Box3(
 );
 const BOID_SIZE = 0.12;
 
-const BOID_GEOMETRY = new THREE.ConeBufferGeometry(BOID_SIZE / 2, BOID_SIZE, 8);
+const BOID_GEOMETRY = new THREE.ConeGeometry(BOID_SIZE / 2, BOID_SIZE, 8);
 const BOID_MATERIAL = new THREE.MeshPhongMaterial({
     color: BOID_COLOR,
     flatShading: true,
@@ -80,7 +80,6 @@ export enum BvhType {
 
 export class BoidsAppOptions {
     constructor(
-        public canvas: HTMLCanvasElement,
         public renderer: THREE.WebGLRenderer,
         public boidsCount: number = 100,
         public bvhType: BvhType = BvhType.OCTREE,
@@ -93,33 +92,37 @@ export class BoidsAppDebugOptions {
 
 export class BoidsApp {
     private boidsList: Boid[] = [];
+    private boidMesh: THREE.InstancedMesh;
+    private dummy: THREE.Object3D;
     private bvh: Bvh<Boid>;
     private bvhType: BvhType;
     private boidsCount: number;
-    private canvas: HTMLCanvasElement;
     private renderer: THREE.WebGLRenderer;
+    private timer: THREE.Timer;
     private camera: THREE.PerspectiveCamera;
     private controls: OrbitControls;
     private scene: THREE.Scene;
-    private lastUpdateTime = -1;
 
     constructor(options: BoidsAppOptions, private debugOptions = new BoidsAppDebugOptions()) {
         this.boidsCount = Math.max(options.boidsCount, 0);
-        this.canvas = options.canvas;
+
+        this.timer = new THREE.Timer();
+        this.timer.connect(document);
 
         this.renderer = options.renderer;
         this.renderer.setClearColor(BACKGROUND_COLOR);
+        this.renderer.setAnimationLoop(this.render.bind(this));
 
         this.camera = new THREE.PerspectiveCamera(
             45,
-            this.canvas.clientWidth / this.canvas.clientHeight,
+            window.innerWidth / window.innerHeight,
             0.1,
             200,
         );
         this.camera.position.set(0, 0, 16.5);
         this.camera.lookAt(0, 0, 0);
 
-        this.controls = new OrbitControls(this.camera, this.canvas);
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
 
         this.scene = new THREE.Scene();
 
@@ -137,16 +140,24 @@ export class BoidsApp {
         if (this.debugOptions.showOctree) {
             this.scene.add(this.bvh.mesh);
         }
+
+        this.boidMesh = new THREE.InstancedMesh(BOID_GEOMETRY, BOID_MATERIAL, this.boidsCount);
+        this.boidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        this.scene.add(this.boidMesh);
+
+        this.dummy = new THREE.Object3D();
+
+        window.addEventListener('resize', this.onWindowResize.bind(this));
     }
 
     run(): void {
         // Scene setup
         const directionalLight = new THREE.DirectionalLight(0xffffff);
         directionalLight.position.set(1, 4, 4);
-        directionalLight.intensity = 0.4;
+        directionalLight.intensity = 2.5;
         this.scene.add(directionalLight);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 2);
         this.scene.add(ambientLight);
 
         const boundingBoxSize = new Vector3();
@@ -159,7 +170,7 @@ export class BoidsApp {
         );
         const boxWireframeGeometry = new THREE.EdgesGeometry(boxGeometry);
         const wireframeMaterial = new THREE.LineBasicMaterial({
-            color: 0xffffff,
+            color: 0xd8d5e7,
             linewidth: 2,
         });
 
@@ -227,10 +238,7 @@ export class BoidsApp {
                 .subScalar(0.5)
                 .multiplyScalar(2 * 0.35);
 
-            const mesh = new THREE.Mesh(BOID_GEOMETRY, BOID_MATERIAL);
-            this.scene.add(mesh);
-
-            const boid = new BoidBuilder(mesh)
+            const boid = new BoidBuilder()
                 .setVelocity(velocity, BOID_MIN_VELOCITY, BOID_MAX_VELOCITY)
                 .setBehavior(behavior, BOID_SIZE, BOID_MASS, CLIPPING_BOX)
                 .setInitialPosition(position)
@@ -238,27 +246,17 @@ export class BoidsApp {
             this.boidsList.push(boid);
             this.bvh.insert(boid);
         }
-
-        requestAnimationFrame(this.render.bind(this));
     }
 
-    render(currentTime: number): void {
-        if (
-            this.canvas.width != this.canvas.clientWidth ||
-            this.canvas.height != this.canvas.clientHeight
-        ) {
-            this.renderer.setSize(this.canvas.clientWidth, this.canvas.clientHeight, false);
-            this.camera.aspect = this.canvas.clientWidth / this.canvas.clientHeight;
-            this.camera.updateProjectionMatrix();
-        }
+    onWindowResize(): void {
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
 
-        if (this.lastUpdateTime == null) {
-            this.lastUpdateTime = currentTime;
-        }
-
-        let deltaTime: number = currentTime - this.lastUpdateTime;
-        deltaTime = Math.min(MAX_DELTA_TIME, deltaTime);
-        this.lastUpdateTime = currentTime;
+    render(): void {
+        this.timer.update();
+        const deltaTime = Math.min(this.timer.getDelta() * 1e3, MAX_DELTA_TIME);
 
         if (this.bvhType == BvhType.BINARY_BVH) {
             const binaryBvh = this.bvh as BinaryBvh<Boid>;
@@ -275,11 +273,15 @@ export class BoidsApp {
         }
 
         for (let i = 0; i < this.boidsList.length; i++) {
-            this.boidsList[i].update(deltaTime);
+            this.boidsList[i].update(deltaTime, this.dummy);
+
+            this.dummy.updateMatrix();
+            this.boidMesh.setMatrixAt(i, this.dummy.matrix);
         }
+
+        this.boidMesh.instanceMatrix.needsUpdate = true;
 
         this.renderer.render(this.scene, this.camera);
         this.controls.update();
-        requestAnimationFrame(this.render.bind(this));
     }
 }

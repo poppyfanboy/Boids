@@ -7,7 +7,7 @@ import { Bvh, BvhItem } from './Bvh';
 import { assert } from '../dev/Assert';
 import { aabbInsideSphere } from '../util/Aabbs';
 
-const MIN_LEAF_NODE_SIZE = 16;
+const MIN_LEAF_NODE_SIZE = 8;
 
 export type ItemData<T extends BinaryBvhItem<T>> = {
     nextItem: T | null;

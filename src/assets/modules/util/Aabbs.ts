@@ -128,12 +128,11 @@ export function aabbInsideSphere(aabb: Box3, sphere: THREE.Sphere): boolean {
         return false;
     }
 
-    const distances: number[] = distancesToAabbSides(sphere.center, aabb);
-    for (let i = 0; i < distances.length; i++) {
-        if (distances[i] > sphere.radius) {
-            return false;
-        }
-    }
+    // Calculate distance from the sphere center to the furthest AABB point.
+    const maxDistanceX = Math.max(Math.abs(sphere.center.x - aabb.min.x), Math.abs(sphere.center.x - aabb.max.x));
+    const maxDistanceY = Math.max(Math.abs(sphere.center.y - aabb.min.y), Math.abs(sphere.center.y - aabb.max.y));
+    const maxDistanceZ = Math.max(Math.abs(sphere.center.z - aabb.min.z), Math.abs(sphere.center.z - aabb.max.z));
+    const maxDistanceSquared = maxDistanceX * maxDistanceX + maxDistanceY * maxDistanceY + maxDistanceZ * maxDistanceZ;
 
-    return true;
+    return maxDistanceSquared <= sphere.radius * sphere.radius;
 }

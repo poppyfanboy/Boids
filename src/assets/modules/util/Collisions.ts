@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { Vector3 } from 'three';
-import { maxComponent, minComponent } from './Vectors';
 
 const signedUnitVectors: Vector3[] = [
     new Vector3(-1, 0, 0),
@@ -31,8 +30,11 @@ export function rayVsAabb(
 
     const near: Vector3 = aabb.min.clone().sub(ray.origin).divide(normalizedDirection);
     const far: Vector3 = aabb.max.clone().sub(ray.origin).divide(normalizedDirection);
-    const tNear: number = maxComponent(near.clone().min(far), 3);
-    const tFar: number = minComponent(near.clone().max(far), 3);
+
+    const nearFarMin = near.clone().min(far);
+    const nearFarMax = near.clone().max(far);
+    const tNear = Math.max(nearFarMin.x, nearFarMin.y, nearFarMin.z);
+    const tFar = Math.min(nearFarMax.x, nearFarMax.y, nearFarMax.z);
 
     if (tNear > tFar || tFar < 0 || tNear > 0 && rayMaxLength < tNear || rayMaxLength < tFar) {
         return [];
@@ -92,8 +94,11 @@ export function lineVsAabb(line: THREE.Ray, aabb: THREE.Box3): LineIntersectionP
 
     const near: Vector3 = aabb.min.clone().sub(line.origin).divide(normalizedDirection);
     const far: Vector3 = aabb.max.clone().sub(line.origin).divide(normalizedDirection);
-    let tNear: number = maxComponent(near.clone().min(far), 3);
-    let tFar: number = minComponent(near.clone().max(far), 3);
+
+    const nearFarMin = near.clone().min(far);
+    const nearFarMax = near.clone().max(far);
+    let tNear = Math.max(nearFarMin.x, nearFarMin.y, nearFarMin.z);
+    let tFar = Math.min(nearFarMax.x, nearFarMax.y, nearFarMax.z);
 
     if (tNear > tFar) {
         return [];

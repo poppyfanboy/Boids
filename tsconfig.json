@@ -1,13 +1,11 @@
 {
     "compilerOptions": {
-        "target": "ES6",
-        "allowJs": true,
+        "target": "es2022",
         "outDir": "./dist/",
-        "module": "ES6",
+        "module": "es2022",
         "noImplicitAny": true,
         "strict": true,
-        "moduleResolution": "Node",
         "sourceMap": true
     },
-    "include": ["./src/"]
+    "include": ["./src/", "vite-env.d.ts"]
 }

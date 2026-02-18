@@ -19,7 +19,6 @@ const INFINITE_BOX = new THREE.Box3(
 
 export class BoidBuilder {
     initialPosition = new Vector3(0, 0, 0);
-    mesh: THREE.Mesh;
     clippingBox: THREE.Box3 = INFINITE_BOX;
     behavior: BoidBehavior = new DummyBehavior();
     mass = 1;
@@ -27,10 +26,6 @@ export class BoidBuilder {
     minVelocity = 0;
     maxVelocity = 1;
     size = 1;
-
-    constructor(mesh: THREE.Mesh) {
-        this.mesh = mesh;
-    }
 
     setVelocity(initialVelocity: Vector3, minVelocity = 0, maxVelocity = 1): BoidBuilder {
         this.initialVelocity = initialVelocity;
@@ -69,7 +64,6 @@ export class BoidBuilder {
         return new Boid(
             this.initialPosition,
             this.initialVelocity,
-            this.mesh,
             this.clippingBox,
             this.behavior,
             this.mass,
@@ -90,7 +84,6 @@ export class Boid implements BinaryBvhItem<Boid> {
     constructor(
         private _position: Vector3,
         private _velocity: Vector3,
-        private mesh: THREE.Mesh,
         private clippingBox: THREE.Box3,
         private behavior: BoidBehavior,
         private mass: number,
@@ -100,15 +93,14 @@ export class Boid implements BinaryBvhItem<Boid> {
         private _orientation: Orientation,
     ) {}
 
-    alignWithVelocity(): void {
+    alignWithVelocity(outTransform: THREE.Object3D): void {
         if (this._velocity.length() > this.minVelocity) {
-            this._orientation.update(this._velocity.clone());
-            this.mesh.lookAt(this._position.clone().add(this._orientation.forward));
-            this.mesh.rotateOnAxis(new Vector3(1, 0, 0), Math.PI / 2);
+            this._orientation.update(this._velocity);
+            outTransform.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), this._orientation.forward);
         }
     }
 
-    update(dtMillis: number): void {
+    update(dtMillis: number, outTransform: THREE.Object3D): void {
         const dtSeconds: number = dtMillis * 0.001;
 
         // Wrap the boid on the the side in case it gets out of the clipping
@@ -142,10 +134,10 @@ export class Boid implements BinaryBvhItem<Boid> {
             .add(steeringForce.divideScalar(this.mass).multiplyScalar(dtSeconds))
             .clampLength(0, this.maxVelocity);
 
-        this.alignWithVelocity();
+        this.alignWithVelocity(outTransform);
 
         this._position.add(this._velocity.clone().multiplyScalar(dtSeconds));
-        this.mesh.position.copy(this._position);
+        outTransform.position.copy(this._position);
     }
 
     get position(): Vector3 {
